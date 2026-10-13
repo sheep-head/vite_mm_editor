@@ -1,0 +1,33 @@
+{
+    "name": "rmmz-game",
+    "main": "index.html",
+    "version": "1.0.0",
+    "type": "commonjs",
+    "nodejs": true,
+    "chromium-args": "--force-color-profile=srgb --mixed-context --allow-file-access-from-files",
+    "node-remote": [
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+    ],
+    "window": {
+        "title": "Project2",
+        "width": 816,
+        "height": 624,
+        "position": "center",
+        "icon": "icon/icon.png",
+        "toolbar": true,
+        "frame": true,
+        "min_width": 400,
+        "min_height": 200,
+        "max_width": 9999,
+        "max_height": 9999,
+        "as_desktop": false,
+        "resizable": true
+    },
+    "protocols": {
+        "myprotocol": {
+            "name": "My Custom Protocol",
+            "schemes": ["myprotocol"]
+        }
+    }
+}

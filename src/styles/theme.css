@@ -1,0 +1,98 @@
+/**
+ * 主题变量 + 皮肤定义
+ * 明亮色为默认皮肤，深暗色通过在 <html> 上加 .dark 类启用
+ * 分层：bg（页底）→ surface（主面板）→ surface-2（侧栏/列表）→ hover
+ */
+
+:root {
+  --app-bg: #eef1f6;
+  --app-surface: #ffffff;
+  --app-surface-2: #f7f8fb;
+  --app-text: #303133;
+  --app-text-muted: #909399;
+  --app-header-bg: #ffffff;
+  --app-header-border: #dcdfe6;
+  --app-header-text: #303133;
+  --app-border: #e4e7ed;
+  --app-list-border: #dcdfe6;
+  --app-hover-bg: #ecf5ff;
+  --app-active-color: #409EFF;
+  --app-contextmenu-bg: #ffffff;
+  --app-contextmenu-text: #303133;
+  --app-contextmenu-hover: #f2f6fc;
+  --app-menu-bg: #f7f8fb;
+  --app-menu-text: #303133;
+  --app-scrollbar-thumb: rgba(0, 0, 0, 0.18);
+  --app-scrollbar-track: rgba(0, 0, 0, 0.06);
+  --app-scrollbar-shadow: rgba(0, 0, 0, 0.12);
+  --app-shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+html.dark {
+  --app-bg: #0f1115;
+  --app-surface: #1a1d24;
+  --app-surface-2: #22262f;
+  --app-text: #e5eaf3;
+  --app-text-muted: #a3a6ad;
+  --app-header-bg: #1a1d24;
+  --app-header-border: #2e3440;
+  --app-header-text: #e5eaf3;
+  --app-border: #2e3440;
+  --app-list-border: #2e3440;
+  --app-hover-bg: #2a303c;
+  --app-active-color: #79bbff;
+  --app-contextmenu-bg: #22262f;
+  --app-contextmenu-text: #e5eaf3;
+  --app-contextmenu-hover: #2a303c;
+  --app-menu-bg: #161a21;
+  --app-menu-text: #cfd3dc;
+  --app-scrollbar-thumb: rgba(255, 255, 255, 0.18);
+  --app-scrollbar-track: rgba(255, 255, 255, 0.06);
+  --app-scrollbar-shadow: rgba(0, 0, 0, 0.35);
+  --app-shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+html,
+body {
+  background-color: var(--app-bg);
+  color: var(--app-text);
+}
+
+/* 菜单皮肤：element-plus 的菜单变量是定义在 .el-menu 上的，这里直接覆盖 */
+.el-menu {
+  --el-menu-bg-color: var(--app-menu-bg);
+  --el-menu-text-color: var(--app-menu-text);
+  --el-menu-hover-bg-color: var(--app-hover-bg);
+  --el-menu-hover-text-color: var(--app-active-color);
+  --el-menu-active-color: var(--app-active-color);
+  --el-menu-border-color: var(--app-border);
+}
+
+html.dark .el-menu {
+  --el-menu-hover-text-color: var(--app-active-color);
+}
+
+/* 折叠时弹出的子菜单挂在 body 上，用 popper 自身的背景跟随皮肤 */
+.el-menu--popup {
+  background-color: var(--app-menu-bg);
+  border-color: var(--app-border);
+}
+
+/* 侧栏 / 主区分层 */
+.el-aside,
+.menu-main-div {
+  background-color: var(--app-menu-bg);
+}
+
+.el-main {
+  background-color: var(--app-surface);
+}
+
+.list-slider {
+  background-color: var(--app-surface-2);
+  box-shadow: var(--app-shadow-soft);
+}
+
+.item-list li.active {
+  color: var(--app-active-color);
+}

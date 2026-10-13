@@ -1,0 +1,24 @@
+{
+    "name": "rmmz-game",
+    "main": "http://127.0.0.1:5288/",
+    "version": "1.0.0",
+    "type": "commonjs",
+    "nodejs": true,
+    "chromium-args": "--force-color-profile=srgb --mixed-context",
+    "node-remote": [
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+    ],
+    "window": {
+        "title": "羊头呀(dev)",
+        "width": 1024,
+        "height": 768,
+        "position": "center",
+        "icon": "icon/icon.png",
+        "toolbar": true,
+        "frame": true,
+        "min_width": 400,
+        "min_height": 200,
+        "resizable": true
+    }
+}

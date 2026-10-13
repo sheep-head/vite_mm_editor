@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>羊头呀</title>
+  <script>
+    /*
+     * NW.js 兼容处理：
+     * vite 打包出来的是 ES module，模块内部没有 require，
+     * 所以在这里把 node 的 require 挂到 window.nwRequire 上，
+     * 项目内部所有 require('xxx') 统一写成 window.nwRequire('xxx') / nwRequire('xxx')。
+     * 非 NW.js 环境（例如直接在浏览器里跑 vite dev）require 不存在，这里兜底为 null。
+     */
+    try {
+      window.nwRequire = require;
+    } catch (e) {
+      window.nwRequire = null;
+    }
+
+    /*
+     * NW.js mixed-context：Node 全局的 CustomEvent/Event 不是 DOM Event，
+     * Element Plus 关闭弹窗时 focus-trap 的 dispatchEvent 会抛错导致弹窗关不掉。
+     * 用隐藏 iframe 取回 Chromium 的构造函数并覆盖全局。
+     */
+    if (window.nwRequire) {
+      var _iframe = document.createElement('iframe');
+      _iframe.style.display = 'none';
+      document.documentElement.appendChild(_iframe);
+      if (_iframe.contentWindow) {
+        window.Event = _iframe.contentWindow.Event;
+        window.CustomEvent = _iframe.contentWindow.CustomEvent;
+      }
+      document.documentElement.removeChild(_iframe);
+    }
+
+    location.hash = "";
+
+    /* NW.js 窗口初始化，非 NW.js 环境自动跳过 */
+    if (window.nwRequire) {
+      var win = window.nwRequire('nw.gui').Window.get();
+      win.maximize();
+      win.showDevTools();
+      /*var menuBar = new nw.Menu({ type: 'menubar' });
+      var fileMenu = new nw.MenuItem({ label: "一级菜单" });
+
+      var fileMenuColl = new nw.Menu();
+      fileMenu.submenu = fileMenuColl;
+      var openMenu = new nw.MenuItem({ label: "二级菜单" });
+      fileMenuColl.append(openMenu);
+
+      menuBar.append(fileMenu);//关键，放在最后没问题，正常！
+
+      win.menu = menuBar;*/
+      // location.href = "https://ytmetalmax.cn/";
+    }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
