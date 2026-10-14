@@ -47,7 +47,7 @@ export default {
   },
   methods: {
     cancelChange() {
-      this.$router.replace('/base/Items').catch(() => true)
+      this.$router.replace('/editor').catch(() => true)
     },
     onDragEnter() {
       this.dragDepth += 1
@@ -123,7 +123,7 @@ export default {
       reloadStoreData()
       ElMessage.success('工作空间已设置')
       // 换工程后整页重载，清空 keep-alive 脏状态，避免 deactivate / 数据串台
-      window.location.hash = '#/base/Items'
+      window.location.hash = '#/editor'
       window.location.reload()
     },
   },

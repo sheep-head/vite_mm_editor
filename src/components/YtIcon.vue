@@ -20,7 +20,8 @@ import {
   CircleClose,
   Close,
   Search,
-  Loading
+  Loading,
+  Tools,
 } from '@element-plus/icons-vue'
 
 /**
@@ -43,7 +44,8 @@ const ICON_MAP = {
   'el-icon-circle-close': CircleClose,
   'el-icon-close': Close,
   'el-icon-search': Search,
-  'el-icon-loading': Loading
+  'el-icon-loading': Loading,
+  'el-icon-s-tools': Tools,
 }
 
 export default {

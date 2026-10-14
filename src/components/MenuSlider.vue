@@ -46,7 +46,7 @@ export default {
     return {
       activeIndex:"",
       isCollapse:false,
-      openeds: ['1'],
+      openeds: ['main', 'extra'],
       routeMenu
     };
   },
@@ -63,12 +63,12 @@ export default {
   watch:{
     //解决浏览器前进后退按钮，导航正常高亮显示
     $route(to){
-      this.activeIndex = to.path;
+      this.activeIndex = to.path === '/' ? '/editor' : to.path;
     }
   },
   mounted(){
     window.menu = this;
-    this.activeIndex = this.$route.path;
+    this.activeIndex = this.$route.path === '/' ? '/editor' : this.$route.path;
   },
 }
 </script>
@@ -77,8 +77,10 @@ export default {
   transition: all .3s;
   background-color: var(--app-menu-bg);
   flex-shrink: 0;
-  overflow: hidden;
+  overflow: auto;
   box-sizing: border-box;
+  height: 100%;
+  border-right: 1px solid var(--app-border);
 }
 .menu-main-div .el-aside{
   width: 100% !important;

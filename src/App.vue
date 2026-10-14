@@ -1,14 +1,14 @@
 <template>
   <section class="el-container is-vertical full-height">
     <yt-header v-if="showChrome"></yt-header>
-    <section class="el-container">
-      <menu-slider v-if="showChrome"></menu-slider>
-      <main class="el-main" :class="{ 'is-workspace': !showChrome }">
-        <!--
-          必须只有一个稳定的 router-view。
-          keep-alive 内的 <component> 不要绑动态 key，否则 Vue3 会报
-          parentComponent.ctx.deactivate is not a function，路由全部挂掉。
-        -->
+    <section class="el-container main-row">
+      <main
+        class="el-main"
+        :class="{
+          'is-workspace': !showChrome,
+          'is-editor': isEditorMain,
+          'is-page': showChrome && !isEditorMain,
+        }">
         <router-view v-slot="{ Component }">
           <transition name="fade-transform" mode="out-in">
             <keep-alive exclude="WorkspaceSelect">
@@ -22,23 +22,42 @@
 </template>
 <script>
 import YtHeader from '@/components/TheHeader.vue'
-import MenuSlider from '@/components/MenuSlider.vue'
 
 export default {
   name: 'App',
   components: {
     YtHeader,
-    MenuSlider,
   },
   computed: {
     showChrome() {
       return this.$route.path !== '/workspace'
-    }
-  }
+    },
+    isEditorMain() {
+      return this.$route.path === '/' || this.$route.path === '/editor'
+    },
+  },
 }
 </script>
 <style scoped>
+.main-row {
+  flex: 1;
+  min-height: 0;
+  height: calc(100% - 52px);
+}
+.el-main {
+  padding: 0;
+  min-height: 0;
+  overflow: hidden;
+}
 .el-main.is-workspace {
   padding: 0;
+}
+.el-main.is-editor {
+  padding: 0;
+  height: 100%;
+}
+.el-main.is-page {
+  padding: 12px;
+  overflow: auto;
 }
 </style>
