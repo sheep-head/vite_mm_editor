@@ -4,9 +4,9 @@
     class="map-tools-panel"
     :style="panelStyle"
     @mousedown.stop>
-    <div class="mtp-title" @pointerdown="onDragStart">
-      <span>地图工具</span>
-      <button type="button" class="mtp-close" title="关闭" @click.stop="close">×</button>
+    <div class="mtp-title">
+      <span class="mtp-title-drag" @pointerdown="onDragStart">地图工具</span>
+      <button type="button" class="mtp-close" title="关闭" @click="close">×</button>
     </div>
     <div class="mtp-body">
       <div class="mtp-row">
@@ -23,7 +23,11 @@
         <el-checkbox :model-value="showHyperlinks" @change="onHyperlinks">
           显示超链接
         </el-checkbox>
-        <el-tooltip :content="hyperlinkTip" placement="top" :show-after="200">
+        <el-tooltip
+          :content="hyperlinkTip"
+          placement="top"
+          :show-after="200"
+          popper-class="map-tools-tip">
           <span class="mtp-q">?</span>
         </el-tooltip>
       </div>
@@ -79,7 +83,8 @@ export default {
   },
   methods: {
     close() {
-      this.$store.dispatch('closeMapTools')
+      this.$store.commit('setMapToolsVisible', false)
+      this.$store.dispatch('persistMapTools')
     },
     onCharSize(v) {
       this.$store.dispatch('setMapCharOriginalSizePersist', v)
@@ -165,7 +170,8 @@ export default {
 <style scoped>
 .map-tools-panel {
   position: fixed;
-  z-index: 2200;
+  /* 低于 el-tooltip / dialog（约 2000+），避免挡住 tip */
+  z-index: 1200;
   display: flex;
   flex-direction: column;
   min-width: 260px;
@@ -182,14 +188,22 @@ export default {
   align-items: center;
   justify-content: space-between;
   height: 32px;
-  padding: 0 8px 0 12px;
+  padding: 0 4px 0 0;
   font-size: 13px;
   font-weight: 600;
   background: var(--app-surface-2, #f3f3f3);
   border-bottom: 1px solid var(--app-border);
-  cursor: move;
   user-select: none;
   flex-shrink: 0;
+}
+.mtp-title-drag {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding-left: 12px;
+  cursor: move;
 }
 .mtp-close {
   width: 28px;
@@ -201,6 +215,9 @@ export default {
   cursor: pointer;
   color: var(--app-text-muted);
   border-radius: 4px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
 }
 .mtp-close:hover {
   background: var(--app-hover-bg);
@@ -248,5 +265,13 @@ export default {
     var(--app-border) 70% 80%,
     transparent 80%
   );
+}
+</style>
+
+<style>
+/* tooltip 挂到 body，保证盖过工具浮窗 */
+.map-tools-tip {
+  z-index: 3000 !important;
+  max-width: 320px;
 }
 </style>

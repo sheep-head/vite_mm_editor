@@ -1,4 +1,5 @@
 /** MZ/MV 地图事件默认模板与指令码摘要 */
+import DataManager from '@/utils/DataManager'
 
 export function createEmptyPage() {
   return {
@@ -187,34 +188,117 @@ export const EVENT_CODE_NAMES = {
   657: '插件指令(续)',
 }
 
+function mapInfoName(mapId) {
+  try {
+    const infos = DataManager.$loadDataSync('MapInfos', false, false) || []
+    const info = infos[mapId]
+    return info && info.name ? info.name : ''
+  } catch (e) {
+    return ''
+  }
+}
+
 export function formatCommandLine(cmd) {
   if (!cmd) return ''
   const name = EVENT_CODE_NAMES[cmd.code] || `指令#${cmd.code}`
   const indent = '　'.repeat(cmd.indent || 0)
   let extra = ''
   const p = cmd.parameters || []
-  if (cmd.code === 101 && p.length) extra = ` ${p[0] || ''} ${p[4] || ''}`.trim()
-  else if (cmd.code === 108 || cmd.code === 408) extra = p[0] ? ` ${p[0]}` : ''
+  if (cmd.code === 101 && p.length) {
+    const who = p[4] ? String(p[4]) : ''
+    const face = p[0] ? String(p[0]) : ''
+    extra = [face, who].filter(Boolean).join(' ')
+    if (extra) extra = ` ${extra}`
+  } else if (cmd.code === 102 && Array.isArray(p[0])) extra = ` ${p[0].join(', ')}`
+  else if (cmd.code === 103) extra = ` 变量#${p[0]} ${p[1]}位`
+  else if (cmd.code === 104) extra = ` 变量#${p[0]}`
+  else if (cmd.code === 105) extra = ` 速度${p[0]}`
+  else if (cmd.code === 108 || cmd.code === 408) extra = p[0] ? `：${p[0]}` : ''
+  else if (cmd.code === 117) extra = ` #${p[0]}`
+  else if (cmd.code === 118 || cmd.code === 119) extra = p[0] ? ` ${p[0]}` : ''
+  else if (cmd.code === 125) extra = ` ${p[0] === 0 ? '+' : '-'}${p[2]}`
+  else if (cmd.code === 126 || cmd.code === 127 || cmd.code === 128) extra = ` #${p[0]} ${p[1] === 0 ? '+' : '-'}${p[3]}`
+  else if (cmd.code === 129) extra = ` 角色#${p[0]} ${p[1] === 0 ? '加入' : '离开'}`
   else if (cmd.code === 355 || cmd.code === 356 || cmd.code === 357) extra = p[0] ? ` ${String(p[0]).slice(0, 60)}` : ''
   else if (cmd.code === 121) extra = ` ${p[0]}..${p[1]} = ${p[2] === 0 ? 'ON' : 'OFF'}`
+  else if (cmd.code === 122) extra = ` ${p[0]}..${p[1]}`
   else if (cmd.code === 123) extra = ` ${p[0]} = ${p[1] === 0 ? 'ON' : 'OFF'}`
-  else if (cmd.code === 201) extra = ` Map${p[1]} (${p[2]},${p[3]})`
-  else if (cmd.code === 230) extra = ` ${p[0]}帧`
-  else if (cmd.code === 401) extra = p[0] ? ` ${p[0]}` : ''
-  const mark = cmd.code === 0 ? ':' : '◆'
+  else if (cmd.code === 124) extra = p[0] === 0 ? ` 启动 ${p[1]}秒` : ' 停止'
+  else if (cmd.code === 111) extra = ''
+  else if (cmd.code === 201) {
+    const mn = p[0] === 0 ? mapInfoName(p[1]) : ''
+    extra = p[0] === 0 ? ` ${mn || 'Map' + p[1]} (${p[2]},${p[3]})` : ` 变量(${p[1]},${p[2]},${p[3]})`
+  } else if (cmd.code === 202) extra = ` 载具${p[0]} Map${p[2]}`
+  else if (cmd.code === 203) extra = ` 事件${p[0]}`
+  else if (cmd.code === 204) extra = ` 距${p[1]}`
+  else if (cmd.code === 211) extra = p[0] === 0 ? ' ON' : ' OFF'
+  else if (cmd.code === 212) extra = ` 动画#${p[1]}`
+  else if (cmd.code === 213) extra = ` 气泡#${p[1]}`
+  else if (cmd.code === 216) extra = p[0] === 0 ? ' ON' : ' OFF'
+  else if (cmd.code === 223 || cmd.code === 224) extra = ` ${p[1]}帧`
+  else if (cmd.code === 225) extra = ` ${p[2]}帧`
+  else if (cmd.code === 230) extra = ` ${p[0]} 帧`
+  else if (cmd.code === 231) extra = ` #${p[0]} ${p[1] || ''}`
+  else if (cmd.code === 232 || cmd.code === 233 || cmd.code === 234 || cmd.code === 235) extra = ` #${p[0]}`
+  else if (cmd.code === 236) extra = ` ${p[0]}`
+  else if (cmd.code === 241 || cmd.code === 245 || cmd.code === 249 || cmd.code === 250 || cmd.code === 132 || cmd.code === 133 || cmd.code === 139) {
+    const a = p[0] || {}
+    extra = a.name ? ` ${a.name}` : ''
+  } else if (cmd.code === 140) {
+    const a = p[1] || {}
+    extra = a.name ? ` ${a.name}` : ''
+  }   else if (cmd.code === 242 || cmd.code === 246) extra = ` ${p[0]}秒`
+  else if (cmd.code === 261) extra = p[0] ? ` ${p[0]}` : ''
+  else if (cmd.code === 205) extra = ` 目标${p[0]}`
+  else if (cmd.code === 301) extra = p[0] === 0 ? ` 敌群#${p[1]}` : ''
+  else if (cmd.code === 302) extra = ` 商品#${p[1]}`
+  else if (cmd.code === 303) extra = ` 角色#${p[0]}`
+  else if (cmd.code === 311 || cmd.code === 312 || cmd.code === 315 || cmd.code === 316) {
+    extra = p[0] === 0 && p[1] === 0 ? ' 全体' : ` #${p[1]}`
+  } else if (cmd.code === 331 || cmd.code === 332) extra = ` 敌人${p[0]}`
+  else if (cmd.code === 355 || cmd.code === 655) extra = p[0] ? ` ${String(p[0]).slice(0, 40)}` : ''
+  else if (cmd.code === 357) extra = p[0] ? ` ${p[0]} ${p[1] || ''}` : ''
+  else if (cmd.code === 401 || cmd.code === 405) extra = p[0] ? ` ${p[0]}` : ''
+  else if (cmd.code === 402) extra = p[1] != null ? ` ${p[1]}` : ''
+  const mark = cmd.code === 0 ? '：' : '◆'
   return `${indent}${mark}${name}${extra}`
 }
 
+/** 对齐 MZ 截图文案 */
 export const TRIGGER_OPTIONS = [
   { value: 0, label: '确定键' },
-  { value: 1, label: '接触触发' },
+  { value: 1, label: '玩家接触' },
   { value: 2, label: '事件接触' },
   { value: 3, label: '自动执行' },
   { value: 4, label: '并行处理' },
 ]
 
 export const PRIORITY_OPTIONS = [
-  { value: 0, label: '比角色低' },
-  { value: 1, label: '与角色同' },
-  { value: 2, label: '比角色高' },
+  { value: 0, label: '在人物下方' },
+  { value: 1, label: '与人物相同' },
+  { value: 2, label: '在人物上方' },
+]
+
+export const MOVE_TYPE_OPTIONS = [
+  { value: 0, label: '固定' },
+  { value: 1, label: '随机' },
+  { value: 2, label: '接近' },
+  { value: 3, label: '自定义' },
+]
+
+export const MOVE_SPEED_OPTIONS = [
+  { value: 1, label: '1: 1/8 倍速' },
+  { value: 2, label: '2: 1/4 倍速' },
+  { value: 3, label: '3: 1/2 倍速' },
+  { value: 4, label: '4: 标准' },
+  { value: 5, label: '5: 2 倍速' },
+  { value: 6, label: '6: 4 倍速' },
+]
+
+export const MOVE_FREQ_OPTIONS = [
+  { value: 1, label: '1: 最低' },
+  { value: 2, label: '2: 低' },
+  { value: 3, label: '3: 标准' },
+  { value: 4, label: '4: 高' },
+  { value: 5, label: '5: 最高' },
 ]

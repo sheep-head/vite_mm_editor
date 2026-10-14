@@ -24,7 +24,8 @@
         <el-form-item
           v-for="field in fields"
           :key="field.key"
-          :label="field.label">
+          :label="field.label"
+          :class="{ 'db-cmd-list-item': field.type === 'eventCommandList' }">
           <el-input
             v-if="field.type === 'text' || !field.type"
             v-model="current[field.key]"
@@ -48,6 +49,10 @@
             type="textarea"
             :rows="field.rows || 8"
             @update:model-value="(v) => setJson(field.key, v)" />
+          <event-command-list-editor
+            v-else-if="field.type === 'eventCommandList'"
+            v-model="current[field.key]"
+            class="db-cmd-list" />
         </el-form-item>
       </el-form>
     </main>
@@ -57,9 +62,11 @@
 
 <script>
 import DataManager from '@/utils/DataManager'
+import EventCommandListEditor from '@/components/map/EventCommandListEditor.vue'
 
 export default {
   name: 'DatabaseArrayPanel',
+  components: { EventCommandListEditor },
   props: {
     fileName: { type: String, required: true },
     fields: { type: Array, default: () => [] },
@@ -131,6 +138,7 @@ export default {
       this.clearWatch()
       this.current = item
       this.jsonErrors = {}
+      this.normalizeCommandLists(item)
       if (item && markDirtyWatch) {
         this._watchStop = this.$watch(
           'current',
@@ -139,6 +147,15 @@ export default {
           },
           { deep: true }
         )
+      }
+    },
+    normalizeCommandLists(item) {
+      if (!item) return
+      for (const field of this.fields || []) {
+        if (field.type !== 'eventCommandList') continue
+        if (!Array.isArray(item[field.key])) {
+          item[field.key] = [{ code: 0, indent: 0, parameters: [] }]
+        }
       }
     },
     jsonText(key) {
@@ -239,5 +256,19 @@ export default {
 }
 .db-num {
   width: 160px;
+}
+.db-cmd-list-item {
+  display: block;
+}
+.db-cmd-list-item :deep(.el-form-item__content) {
+  display: block;
+  width: 100%;
+}
+.db-cmd-list {
+  width: 100%;
+  min-height: 360px;
+}
+.db-cmd-list :deep(.ev-cmd-list) {
+  max-height: 52vh;
 }
 </style>

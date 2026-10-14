@@ -144,7 +144,7 @@ export const COMMON_EVENT_FIELDS = [
   ...NAME_NOTE,
   { key: 'trigger', label: '触发', type: 'number' },
   { key: 'switchId', label: '条件开关', type: 'number' },
-  { key: 'list', label: '事件指令 JSON', type: 'json', rows: 12 },
+  { key: 'list', label: '执行内容', type: 'eventCommandList' },
 ]
 
 /** Tab 定义：name 用作 el-tab-pane name */

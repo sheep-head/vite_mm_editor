@@ -2,11 +2,12 @@
   <el-dialog
     :model-value="modelValue"
     :title="dialogTitle"
-    width="920px"
-    top="6vh"
+    width="980px"
+    top="4vh"
     append-to-body
     destroy-on-close
     :close-on-click-modal="false"
+    :close-on-press-escape="false"
     class="event-editor-dialog"
     @update:model-value="onVisible">
     <div v-if="draft" class="ev-body" :class="{ 'is-ref': isRefMode }">
@@ -20,225 +21,279 @@
           跳转到模板事件
         </el-button>
       </div>
-      <div class="ev-meta">
-        <el-form inline size="small" label-width="48px" :disabled="isRefMode">
-          <el-form-item label="ID">
-            <span class="ev-id">{{ draft.id }}</span>
-          </el-form-item>
+
+      <div class="ev-top">
+        <el-form inline size="small" label-width="48px" :disabled="isRefMode" class="ev-meta">
           <el-form-item label="名称">
-            <el-input v-model="draft.name" style="width: 200px" :disabled="isRefMode" />
+            <el-input v-model="draft.name" style="width: 160px" />
           </el-form-item>
           <el-form-item label="备注">
-            <el-input v-model="draft.note" style="width: 280px" :disabled="isRefMode" />
+            <el-input v-model="draft.note" style="width: 220px" />
           </el-form-item>
         </el-form>
+        <div v-if="!isRefMode" class="ev-page-ops">
+          <el-button size="small" @click="addPage">新建事件页</el-button>
+          <el-button size="small" @click="copyPage">复制事件页</el-button>
+          <el-button size="small" :disabled="!pageClipboard" @click="pastePage">粘贴事件页</el-button>
+          <el-button size="small" :disabled="draft.pages.length <= 1" @click="removePage">删除事件页</el-button>
+          <el-button size="small" @click="clearPage">清空事件页</el-button>
+        </div>
       </div>
 
-      <div class="ev-main">
-        <aside class="ev-pages">
-          <div class="ev-pages-title">事件页</div>
-          <el-scrollbar class="ev-pages-scroll">
-            <button
-              v-for="(page, idx) in draft.pages"
-              :key="idx"
-              type="button"
-              class="ev-page-item"
-              :class="{ active: pageIndex === idx }"
-              @click="pageIndex = idx">
-              {{ idx + 1 }}
-            </button>
-          </el-scrollbar>
-          <div v-if="!isRefMode" class="ev-pages-actions">
-            <el-button size="small" @click="addPage">新建</el-button>
-            <el-button size="small" :disabled="draft.pages.length <= 1" @click="copyPage">复制</el-button>
-            <el-button size="small" :disabled="draft.pages.length <= 1" @click="removePage">删除</el-button>
-            <el-button size="small" :disabled="pageIndex <= 0" @click="movePage(-1)">上移</el-button>
-            <el-button size="small" :disabled="pageIndex >= draft.pages.length - 1" @click="movePage(1)">下移</el-button>
-          </div>
+      <div class="ev-page-tabs">
+        <button
+          v-for="(page, idx) in draft.pages"
+          :key="idx"
+          type="button"
+          class="ev-page-tab"
+          :class="{ active: pageIndex === idx }"
+          @click="pageIndex = idx">
+          {{ idx + 1 }}
+        </button>
+      </div>
+
+      <div v-if="currentPage" class="ev-main">
+        <aside class="ev-left">
+          <fieldset class="ev-box">
+            <legend>出现条件</legend>
+            <el-form size="small" label-width="0" :disabled="isRefMode" class="ev-cond">
+              <div class="ev-cond-row">
+                <el-checkbox v-model="currentPage.conditions.switch1Valid">开关</el-checkbox>
+                <el-input-number
+                  v-model="currentPage.conditions.switch1Id"
+                  :min="1"
+                  :disabled="!currentPage.conditions.switch1Valid"
+                  controls-position="right"
+                  size="small" />
+                <el-button
+                  size="small"
+                  :disabled="!currentPage.conditions.switch1Valid"
+                  @click="openPicker('switch', 'switch1Id')">
+                  ...
+                </el-button>
+              </div>
+              <div class="ev-cond-row">
+                <el-checkbox v-model="currentPage.conditions.switch2Valid">开关</el-checkbox>
+                <el-input-number
+                  v-model="currentPage.conditions.switch2Id"
+                  :min="1"
+                  :disabled="!currentPage.conditions.switch2Valid"
+                  controls-position="right"
+                  size="small" />
+                <el-button
+                  size="small"
+                  :disabled="!currentPage.conditions.switch2Valid"
+                  @click="openPicker('switch', 'switch2Id')">
+                  ...
+                </el-button>
+              </div>
+              <div class="ev-cond-row">
+                <el-checkbox v-model="currentPage.conditions.variableValid">变量</el-checkbox>
+                <el-input-number
+                  v-model="currentPage.conditions.variableId"
+                  :min="1"
+                  :disabled="!currentPage.conditions.variableValid"
+                  controls-position="right"
+                  size="small" />
+                <el-button
+                  size="small"
+                  :disabled="!currentPage.conditions.variableValid"
+                  @click="openPicker('variable', 'variableId')">
+                  ...
+                </el-button>
+                <span>≥</span>
+                <el-input-number
+                  v-model="currentPage.conditions.variableValue"
+                  :disabled="!currentPage.conditions.variableValid"
+                  controls-position="right"
+                  size="small" />
+              </div>
+              <div class="ev-cond-row">
+                <el-checkbox v-model="currentPage.conditions.selfSwitchValid">独立开关</el-checkbox>
+                <el-select
+                  v-model="currentPage.conditions.selfSwitchCh"
+                  :disabled="!currentPage.conditions.selfSwitchValid"
+                  style="width: 72px">
+                  <el-option v-for="ch in ['A', 'B', 'C', 'D']" :key="ch" :label="ch" :value="ch" />
+                </el-select>
+              </div>
+              <div class="ev-cond-row">
+                <el-checkbox v-model="currentPage.conditions.itemValid">物品</el-checkbox>
+                <el-input-number
+                  v-model="currentPage.conditions.itemId"
+                  :min="1"
+                  :disabled="!currentPage.conditions.itemValid"
+                  controls-position="right"
+                  size="small" />
+                <el-button
+                  size="small"
+                  :disabled="!currentPage.conditions.itemValid"
+                  @click="openPicker('item', 'itemId')">
+                  ...
+                </el-button>
+              </div>
+              <div class="ev-cond-row">
+                <el-checkbox v-model="currentPage.conditions.actorValid">角色</el-checkbox>
+                <el-input-number
+                  v-model="currentPage.conditions.actorId"
+                  :min="1"
+                  :disabled="!currentPage.conditions.actorValid"
+                  controls-position="right"
+                  size="small" />
+                <el-button
+                  size="small"
+                  :disabled="!currentPage.conditions.actorValid"
+                  @click="openPicker('actor', 'actorId')">
+                  ...
+                </el-button>
+              </div>
+            </el-form>
+          </fieldset>
+
+          <fieldset class="ev-box ev-image-box">
+            <legend>图像</legend>
+            <div class="ev-char-preview" title="点击编辑图像" @click="!isRefMode && (imageEditVisible = true)">
+              <canvas ref="charCanvas" width="96" height="96" />
+            </div>
+          </fieldset>
+
+          <fieldset class="ev-box">
+            <legend>自主移动</legend>
+            <el-form size="small" label-width="72px" :disabled="isRefMode">
+              <el-form-item label="类型">
+                <el-select v-model="currentPage.moveType" style="width: 120px">
+                  <el-option v-for="o in moveTypeOptions" :key="o.value" :label="o.label" :value="o.value" />
+                </el-select>
+                <el-button size="small" :disabled="currentPage.moveType !== 3" class="ml">路线...</el-button>
+              </el-form-item>
+              <el-form-item label="移动速度">
+                <el-select v-model="currentPage.moveSpeed" style="width: 140px">
+                  <el-option v-for="o in moveSpeedOptions" :key="o.value" :label="o.label" :value="o.value" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="移动频率">
+                <el-select v-model="currentPage.moveFrequency" style="width: 140px">
+                  <el-option v-for="o in moveFreqOptions" :key="o.value" :label="o.label" :value="o.value" />
+                </el-select>
+              </el-form-item>
+            </el-form>
+          </fieldset>
+
+          <fieldset class="ev-box">
+            <legend>选项</legend>
+            <el-checkbox v-model="currentPage.walkAnime" :disabled="isRefMode">步行动画</el-checkbox>
+            <el-checkbox v-model="currentPage.stepAnime" :disabled="isRefMode">踏步动画</el-checkbox>
+            <el-checkbox v-model="currentPage.directionFix" :disabled="isRefMode">固定朝向</el-checkbox>
+            <el-checkbox v-model="currentPage.through" :disabled="isRefMode">穿透</el-checkbox>
+          </fieldset>
+
+          <el-form size="small" label-width="72px" :disabled="isRefMode" class="ev-pri">
+            <el-form-item label="优先级">
+              <el-select v-model="currentPage.priorityType" style="width: 140px">
+                <el-option v-for="o in priorityOptions" :key="o.value" :label="o.label" :value="o.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="触发条件">
+              <el-select v-model="currentPage.trigger" style="width: 140px">
+                <el-option v-for="o in triggerOptions" :key="o.value" :label="o.label" :value="o.value" />
+              </el-select>
+            </el-form-item>
+          </el-form>
         </aside>
 
-        <section v-if="currentPage" class="ev-page-edit">
-          <el-tabs v-model="tab">
-            <el-tab-pane label="条件 / 图像 / 触发" name="main">
-              <div class="ev-cols">
-                <div class="ev-col">
-                  <div class="ev-section-title">出现条件</div>
-                  <el-form size="small" label-width="72px" :disabled="isRefMode">
-                    <el-form-item>
-                      <el-checkbox v-model="currentPage.conditions.switch1Valid">开关</el-checkbox>
-                      <el-input-number
-                        v-model="currentPage.conditions.switch1Id"
-                        :min="1"
-                        :disabled="!currentPage.conditions.switch1Valid"
-                        size="small"
-                        controls-position="right" />
-                    </el-form-item>
-                    <el-form-item>
-                      <el-checkbox v-model="currentPage.conditions.switch2Valid">开关</el-checkbox>
-                      <el-input-number
-                        v-model="currentPage.conditions.switch2Id"
-                        :min="1"
-                        :disabled="!currentPage.conditions.switch2Valid"
-                        size="small"
-                        controls-position="right" />
-                    </el-form-item>
-                    <el-form-item>
-                      <el-checkbox v-model="currentPage.conditions.variableValid">变量</el-checkbox>
-                      <el-input-number
-                        v-model="currentPage.conditions.variableId"
-                        :min="1"
-                        :disabled="!currentPage.conditions.variableValid"
-                        size="small"
-                        controls-position="right" />
-                      ≥
-                      <el-input-number
-                        v-model="currentPage.conditions.variableValue"
-                        :disabled="!currentPage.conditions.variableValid"
-                        size="small"
-                        controls-position="right" />
-                    </el-form-item>
-                    <el-form-item>
-                      <el-checkbox v-model="currentPage.conditions.selfSwitchValid">独立开关</el-checkbox>
-                      <el-select
-                        v-model="currentPage.conditions.selfSwitchCh"
-                        :disabled="!currentPage.conditions.selfSwitchValid"
-                        style="width: 72px">
-                        <el-option v-for="ch in ['A', 'B', 'C', 'D']" :key="ch" :label="ch" :value="ch" />
-                      </el-select>
-                    </el-form-item>
-                    <el-form-item>
-                      <el-checkbox v-model="currentPage.conditions.itemValid">物品</el-checkbox>
-                      <el-input-number
-                        v-model="currentPage.conditions.itemId"
-                        :min="1"
-                        :disabled="!currentPage.conditions.itemValid"
-                        size="small"
-                        controls-position="right" />
-                    </el-form-item>
-                    <el-form-item>
-                      <el-checkbox v-model="currentPage.conditions.actorValid">角色</el-checkbox>
-                      <el-input-number
-                        v-model="currentPage.conditions.actorId"
-                        :min="1"
-                        :disabled="!currentPage.conditions.actorValid"
-                        size="small"
-                        controls-position="right" />
-                    </el-form-item>
-                  </el-form>
-                </div>
-
-                <div class="ev-col">
-                  <div class="ev-section-title">图像</div>
-                  <el-form size="small" label-width="72px" :disabled="isRefMode">
-                    <el-form-item label="文件">
-                      <el-input v-model="currentPage.image.characterName" placeholder="img/characters 文件名" />
-                    </el-form-item>
-                    <el-form-item label="索引">
-                      <el-input-number v-model="currentPage.image.characterIndex" :min="0" :max="7" size="small" />
-                    </el-form-item>
-                    <el-form-item label="方向">
-                      <el-select v-model="currentPage.image.direction" style="width: 100px">
-                        <el-option :value="2" label="下" />
-                        <el-option :value="4" label="左" />
-                        <el-option :value="6" label="右" />
-                        <el-option :value="8" label="上" />
-                      </el-select>
-                    </el-form-item>
-                    <el-form-item label="图案">
-                      <el-input-number v-model="currentPage.image.pattern" :min="0" :max="2" size="small" />
-                    </el-form-item>
-                  </el-form>
-
-                  <div class="ev-section-title">选项</div>
-                  <el-form size="small" label-width="72px" :disabled="isRefMode">
-                    <el-form-item label="优先级">
-                      <el-select v-model="currentPage.priorityType" style="width: 140px">
-                        <el-option
-                          v-for="o in priorityOptions"
-                          :key="o.value"
-                          :label="o.label"
-                          :value="o.value" />
-                      </el-select>
-                    </el-form-item>
-                    <el-form-item label="触发">
-                      <el-select v-model="currentPage.trigger" style="width: 140px">
-                        <el-option
-                          v-for="o in triggerOptions"
-                          :key="o.value"
-                          :label="o.label"
-                          :value="o.value" />
-                      </el-select>
-                    </el-form-item>
-                    <el-form-item>
-                      <el-checkbox v-model="currentPage.walkAnime">步行动画</el-checkbox>
-                      <el-checkbox v-model="currentPage.stepAnime">踏步动画</el-checkbox>
-                      <el-checkbox v-model="currentPage.directionFix">固定朝向</el-checkbox>
-                      <el-checkbox v-model="currentPage.through">穿透</el-checkbox>
-                    </el-form-item>
-                  </el-form>
-                </div>
-              </div>
-            </el-tab-pane>
-
-            <el-tab-pane label="执行内容" name="list">
-              <el-scrollbar class="ev-cmd-scroll">
-                <div
-                  v-for="(cmd, i) in currentPage.list"
-                  :key="i"
-                  class="ev-cmd-line"
-                  :class="{ end: cmd.code === 0 }">
-                  {{ formatCommandLine(cmd) }}
-                </div>
-              </el-scrollbar>
-              <el-collapse v-if="!isRefMode" class="ev-json">
-                <el-collapse-item title="高级：本页 list JSON" name="json">
-                  <el-input
-                    v-model="listJson"
-                    type="textarea"
-                    :rows="10"
-                    @blur="applyListJson" />
-                  <p v-if="listJsonError" class="ev-json-err">{{ listJsonError }}</p>
-                </el-collapse-item>
-              </el-collapse>
-            </el-tab-pane>
-          </el-tabs>
+        <section class="ev-right">
+          <event-command-list-editor
+            v-if="currentPage"
+            v-model="currentPage.list"
+            :readonly="isRefMode" />
         </section>
       </div>
     </div>
 
     <template #footer>
       <el-button @click="onVisible(false)">{{ isRefMode ? '关闭' : '取消' }}</el-button>
+      <el-button v-if="!isRefMode" @click="apply">应用</el-button>
       <el-button v-if="!isRefMode" type="primary" @click="confirm">确定</el-button>
     </template>
+
+    <id-name-picker-dialog
+      v-model="pickerVisible"
+      :type="pickerType"
+      :model-id="pickerModelId"
+      @confirm="onPickerConfirm" />
+
+    <el-dialog
+      v-model="imageEditVisible"
+      title="图像"
+      width="400px"
+      append-to-body
+      :close-on-click-modal="false"
+      @closed="paintCharPreview">
+      <el-form v-if="currentPage" size="small" label-width="72px">
+        <el-form-item label="文件">
+          <el-input v-model="currentPage.image.characterName" placeholder="img/characters 文件名" />
+        </el-form-item>
+        <el-form-item label="索引">
+          <el-input-number v-model="currentPage.image.characterIndex" :min="0" :max="7" />
+        </el-form-item>
+        <el-form-item label="方向">
+          <el-select v-model="currentPage.image.direction" style="width: 100px">
+            <el-option :value="2" label="下" />
+            <el-option :value="4" label="左" />
+            <el-option :value="6" label="右" />
+            <el-option :value="8" label="上" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="图案">
+          <el-input-number v-model="currentPage.image.pattern" :min="0" :max="2" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button type="primary" @click="imageEditVisible = false">完成</el-button>
+      </template>
+    </el-dialog>
   </el-dialog>
 </template>
 
 <script>
+import { ElMessage } from 'element-plus'
+import DataManager from '@/utils/DataManager'
+import { fs, path, isNw } from '@/utils/nw'
 import {
   createEmptyPage,
-  formatCommandLine,
   TRIGGER_OPTIONS,
   PRIORITY_OPTIONS,
+  MOVE_TYPE_OPTIONS,
+  MOVE_SPEED_OPTIONS,
+  MOVE_FREQ_OPTIONS,
 } from './eventDefaults'
+import IdNamePickerDialog from './pickers/IdNamePickerDialog.vue'
+import EventCommandListEditor from './EventCommandListEditor.vue'
 
 export default {
   name: 'EventEditorDialog',
+  components: { IdNamePickerDialog, EventCommandListEditor },
   props: {
     modelValue: { type: Boolean, default: false },
     event: { type: Object, default: null },
-    /** { mapId, refId } 只读引用模式 */
     refMode: { type: Object, default: null },
   },
-  emits: ['update:modelValue', 'confirm', 'jump-to-ref'],
+  emits: ['update:modelValue', 'confirm', 'apply', 'jump-to-ref'],
   data() {
     return {
       draft: null,
       pageIndex: 0,
-      tab: 'main',
-      listJson: '',
-      listJsonError: '',
+      pageClipboard: null,
       triggerOptions: TRIGGER_OPTIONS,
       priorityOptions: PRIORITY_OPTIONS,
+      moveTypeOptions: MOVE_TYPE_OPTIONS,
+      moveSpeedOptions: MOVE_SPEED_OPTIONS,
+      moveFreqOptions: MOVE_FREQ_OPTIONS,
+      pickerVisible: false,
+      pickerType: 'switch',
+      pickerField: '',
+      imageEditVisible: false,
+      _charImg: null,
     }
   },
   computed: {
@@ -246,15 +301,26 @@ export default {
       return !!(this.refMode && this.refMode.refId)
     },
     dialogTitle() {
-      if (!this.draft) return '事件编辑'
+      if (!this.draft) return '事件编辑器'
       if (this.isRefMode) {
         return `引用事件 · Map${String(this.refMode.mapId).padStart(3, '0')} EV${String(this.refMode.refId).padStart(3, '0')}`
       }
-      return `事件编辑 · EV${String(this.draft.id).padStart(3, '0')}`
+      return `ID:${String(this.draft.id).padStart(3, '0')} - 事件编辑器`
     },
     currentPage() {
       if (!this.draft || !this.draft.pages) return null
       return this.draft.pages[this.pageIndex] || null
+    },
+    pickerModelId() {
+      if (!this.currentPage || !this.pickerField) return 1
+      return this.currentPage.conditions[this.pickerField] || 1
+    },
+    workRoot() {
+      try {
+        return DataManager.$config && DataManager.$config.workSpace
+      } catch (e) {
+        return ''
+      }
     },
   },
   watch: {
@@ -262,20 +328,16 @@ export default {
       if (v) this.resetDraft()
     },
     pageIndex() {
-      this.syncListJson()
+      this.$nextTick(() => this.paintCharPreview())
     },
-    'currentPage.list': {
+    'currentPage.image': {
       deep: true,
       handler() {
-        if (this.tab === 'list') this.syncListJson()
+        this.paintCharPreview()
       },
-    },
-    tab(v) {
-      if (v === 'list') this.syncListJson()
     },
   },
   methods: {
-    formatCommandLine,
     resetDraft() {
       if (!this.event) {
         this.draft = null
@@ -286,63 +348,110 @@ export default {
         this.draft.pages = [createEmptyPage()]
       }
       this.pageIndex = 0
-      this.tab = 'main'
-      this.listJsonError = ''
-      this.syncListJson()
-    },
-    syncListJson() {
-      if (!this.currentPage) {
-        this.listJson = '[]'
-        return
-      }
-      this.listJson = JSON.stringify(this.currentPage.list || [], null, 2)
-      this.listJsonError = ''
-    },
-    applyListJson() {
-      if (!this.currentPage) return
-      try {
-        const parsed = JSON.parse(this.listJson)
-        if (!Array.isArray(parsed)) throw new Error('必须是数组')
-        this.currentPage.list = parsed
-        this.listJsonError = ''
-      } catch (e) {
-        this.listJsonError = 'JSON 无效: ' + e.message
-      }
+      this.$nextTick(() => this.paintCharPreview())
     },
     addPage() {
       this.draft.pages.push(createEmptyPage())
       this.pageIndex = this.draft.pages.length - 1
     },
     copyPage() {
-      const page = JSON.parse(JSON.stringify(this.currentPage))
-      this.draft.pages.splice(this.pageIndex + 1, 0, page)
+      this.pageClipboard = JSON.parse(JSON.stringify(this.currentPage))
+      ElMessage.success('已复制事件页')
+    },
+    pastePage() {
+      if (!this.pageClipboard) return
+      this.draft.pages.splice(this.pageIndex + 1, 0, JSON.parse(JSON.stringify(this.pageClipboard)))
       this.pageIndex += 1
     },
     removePage() {
       if (this.draft.pages.length <= 1) return
       this.draft.pages.splice(this.pageIndex, 1)
-      if (this.pageIndex >= this.draft.pages.length) {
-        this.pageIndex = this.draft.pages.length - 1
+      if (this.pageIndex >= this.draft.pages.length) this.pageIndex = this.draft.pages.length - 1
+    },
+    clearPage() {
+      if (!window.confirm('清空当前事件页？')) return
+      this.draft.pages[this.pageIndex] = createEmptyPage()
+      this.paintCharPreview()
+    },
+    openPicker(type, field) {
+      this.pickerType = type
+      this.pickerField = field
+      this.pickerVisible = true
+    },
+    onPickerConfirm(id) {
+      if (this.currentPage && this.pickerField) {
+        this.currentPage.conditions[this.pickerField] = id
       }
     },
-    movePage(dir) {
-      const to = this.pageIndex + dir
-      if (to < 0 || to >= this.draft.pages.length) return
-      const arr = this.draft.pages
-      const tmp = arr[this.pageIndex]
-      arr[this.pageIndex] = arr[to]
-      arr[to] = tmp
-      this.pageIndex = to
+    async paintCharPreview() {
+      const canvas = this.$refs.charCanvas
+      if (!canvas || !this.currentPage) return
+      const ctx = canvas.getContext('2d')
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      // checkerboard
+      const s = 8
+      for (let y = 0; y < canvas.height; y += s) {
+        for (let x = 0; x < canvas.width; x += s) {
+          ctx.fillStyle = (x / s + y / s) % 2 === 0 ? '#ccc' : '#fff'
+          ctx.fillRect(x, y, s, s)
+        }
+      }
+      const imgData = this.currentPage.image
+      const name = imgData && imgData.characterName
+      if (!name || !isNw || !fs || !path || !this.workRoot) return
+      const file = path.join(this.workRoot, 'img', 'characters', name + '.png')
+      if (!fs.existsSync(file)) return
+      const img = await this.loadImage(file)
+      if (!img) return
+      const big = name.startsWith('$') || name.startsWith('!$')
+      const cw = big ? img.width / 3 : img.width / 12
+      const ch = big ? img.height / 4 : img.height / 8
+      const index = imgData.characterIndex || 0
+      const pattern = typeof imgData.pattern === 'number' ? imgData.pattern : 1
+      const direction = imgData.direction || 2
+      const col = big ? pattern : (index % 4) * 3 + pattern
+      const row = big ? (direction - 2) / 2 : Math.floor(index / 4) * 4 + (direction - 2) / 2
+      const sx = col * cw
+      const sy = row * ch
+      const scale = Math.min(canvas.width / cw, canvas.height / ch)
+      const dw = cw * scale
+      const dh = ch * scale
+      ctx.drawImage(img, sx, sy, cw, ch, (canvas.width - dw) / 2, canvas.height - dh, dw, dh)
+    },
+    loadImage(file) {
+      return new Promise((resolve) => {
+        const img = new Image()
+        img.onload = () => resolve(img)
+        img.onerror = () => {
+          try {
+            img.src = 'file:///' + file.replace(/\\/g, '/')
+            img.onload = () => resolve(img)
+            img.onerror = () => resolve(null)
+          } catch (e) {
+            resolve(null)
+          }
+        }
+        img.src = file
+      })
     },
     onVisible(v) {
       this.$emit('update:modelValue', v)
     },
-    confirm() {
+    emitDraft(close) {
       if (this.isRefMode) return
-      if (this.tab === 'list') this.applyListJson()
-      if (this.listJsonError) return
-      this.$emit('confirm', JSON.parse(JSON.stringify(this.draft)))
-      this.$emit('update:modelValue', false)
+      const payload = JSON.parse(JSON.stringify(this.draft))
+      if (close) {
+        this.$emit('confirm', payload)
+        this.$emit('update:modelValue', false)
+      } else {
+        this.$emit('apply', payload)
+      }
+    },
+    apply() {
+      this.emitDraft(false)
+    },
+    confirm() {
+      this.emitDraft(true)
     },
   },
 }
@@ -355,7 +464,7 @@ export default {
   justify-content: space-between;
   gap: 12px;
   padding: 8px 12px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   font-size: 13px;
   color: #b88230;
   background: rgba(230, 162, 60, 0.12);
@@ -365,99 +474,93 @@ export default {
 .ev-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  min-height: 480px;
+  gap: 6px;
+  min-height: 520px;
 }
-.ev-id {
-  font-family: monospace;
-  min-width: 32px;
-  display: inline-block;
+.ev-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ev-page-ops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.ev-page-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--app-border);
+}
+.ev-page-tab {
+  min-width: 36px;
+  height: 28px;
+  border: 1px solid var(--app-border);
+  border-bottom: none;
+  background: var(--app-surface-2);
+  cursor: pointer;
+  color: var(--app-text);
+}
+.ev-page-tab.active {
+  background: var(--app-surface);
+  color: var(--app-active-color);
+  font-weight: 600;
 }
 .ev-main {
   display: flex;
   gap: 12px;
-  min-height: 420px;
+  min-height: 440px;
 }
-.ev-pages {
-  width: 88px;
+.ev-left {
+  width: 300px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--app-border);
-  border-radius: 4px;
-  overflow: hidden;
+  gap: 8px;
+  max-height: 62vh;
+  overflow: auto;
 }
-.ev-pages-title {
-  padding: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  text-align: center;
-  border-bottom: 1px solid var(--app-border);
-  background: var(--app-surface-2);
-}
-.ev-pages-scroll {
+.ev-right {
   flex: 1;
-  min-height: 200px;
-}
-.ev-page-item {
-  display: block;
-  width: 100%;
-  height: 32px;
-  border: none;
-  border-bottom: 1px solid var(--app-border);
-  background: transparent;
-  cursor: pointer;
-  color: var(--app-text);
-}
-.ev-page-item.active {
-  background: var(--app-hover-bg);
-  color: var(--app-active-color);
-  font-weight: 600;
-}
-.ev-pages-actions {
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 6px;
-  border-top: 1px solid var(--app-border);
 }
-.ev-page-edit {
-  flex: 1;
-  min-width: 0;
-}
-.ev-cols {
-  display: flex;
-  gap: 16px;
-}
-.ev-col {
-  flex: 1;
-  min-width: 0;
-}
-.ev-section-title {
-  font-size: 13px;
-  font-weight: 600;
-  margin: 0 0 8px;
-  color: var(--app-text-muted);
-}
-.ev-cmd-scroll {
-  height: 280px;
+.ev-box {
+  margin: 0;
+  padding: 6px 8px 8px;
   border: 1px solid var(--app-border);
   border-radius: 4px;
-  background: var(--app-surface-2);
-  margin-bottom: 8px;
 }
-.ev-cmd-line {
-  font-family: Consolas, 'Courier New', monospace;
+.ev-box legend {
+  padding: 0 4px;
   font-size: 12px;
-  padding: 2px 8px;
-  white-space: pre;
+  font-weight: 600;
+  color: var(--app-text-muted);
 }
-.ev-cmd-line.end {
-  opacity: 0.55;
+.ev-cond-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
 }
-.ev-json-err {
-  color: #f56c6c;
-  font-size: 12px;
-  margin: 4px 0 0;
+.ev-char-preview {
+  width: 96px;
+  height: 96px;
+  margin: 0 auto;
+  border: 1px solid var(--app-border);
+  cursor: pointer;
+}
+.ev-image-box {
+  text-align: center;
+}
+.ml {
+  margin-left: 6px;
+}
+.ev-pri {
+  padding: 0 4px;
 }
 </style>

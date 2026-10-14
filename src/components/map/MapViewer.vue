@@ -411,10 +411,19 @@ export default {
         await this.preloadStartCharacters()
         this.loadTilesetFlags()
         this.needsRedraw = true
-        this.pendingFit = true
+        const willFocus = !!(
+          (this._pendingFocus && this._pendingFocus.mapId === mapId) ||
+          (this.focusEventRequest && this.focusEventRequest.mapId === mapId)
+        )
+        // 有定位请求时不要先 fit，后面会切到实际大小并居中
+        this.pendingFit = !willFocus
         this.$nextTick(() => {
           this.resizeCanvas()
-          this.fitToView()
+          if (!willFocus) this.fitToView()
+          else {
+            this.zoom = 1
+            this.emitZoom()
+          }
           this.renderToCache()
           this.render()
           if (this.previewWalkAnim) this.startWalkAnim()
@@ -454,12 +463,20 @@ export default {
       this.$store.commit('clearFocusEventRequest')
       this.selectedEventId = ev.id
       this.selectedTile = { x: ev.x, y: ev.y }
-      this.centerOnTile(ev.x, ev.y)
+      // 定位：先切到实际大小(100%)，再尽量把事件放到视口中心
+      this.focusEventAtActualSize(ev.x, ev.y)
       this.$emit('event-select', { id: ev.id, name: ev.name, x: ev.x, y: ev.y })
-      // 居中/滚动条同步后再开光圈，并保证至少播满 2s
       this.$nextTick(() => {
         this.focusEventRing(ev.id)
       })
+    },
+
+    /** 实际大小 + 尽量居中（靠边时 clamp 后靠左上也可） */
+    focusEventAtActualSize(mx, my) {
+      if (!this.canvas || !this.currentMapData) return
+      this.zoom = 1
+      this.emitZoom()
+      this.centerOnTile(mx, my)
     },
 
     centerOnTile(mx, my) {

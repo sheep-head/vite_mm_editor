@@ -114,6 +114,7 @@
       :event="editingEvent"
       :ref-mode="editorRefMode"
       @confirm="onEditorConfirm"
+      @apply="onEditorApply"
       @jump-to-ref="onJumpToRef" />
 
     <database-dialog
@@ -482,11 +483,18 @@ export default {
       this._pendingCreate = true
     },
     async onEditorConfirm(draft) {
+      await this.persistEditedEvent(draft, true)
+    },
+    async onEditorApply(draft) {
+      await this.persistEditedEvent(draft, false)
+    },
+    async persistEditedEvent(draft, closeAfter) {
       const v = this.viewer()
-      if (!v) return
+      if (!v || !draft) return
       const before = this.snapshotEvents()
-      if (draft.pages && draft.pages[0] && draft.pages[0].image && draft.pages[0].image.characterName) {
-        await v.ensureCharacterImage(draft.pages[0].image.characterName)
+      for (const page of draft.pages || []) {
+        const n = page && page.image && page.image.characterName
+        if (n) await v.ensureCharacterImage(n)
       }
       v.upsertEvent(draft)
       this.pushEventsHistory(this._pendingCreate ? '新建事件' : '编辑事件', before)
@@ -496,8 +504,12 @@ export default {
         x: draft.x,
         y: draft.y,
       }
+      this.editingEvent = JSON.parse(JSON.stringify(draft))
       this._pendingCreate = false
       this.saveMap()
+      if (!closeAfter) {
+        // 应用后保持对话框打开；同步草稿数据源
+      }
     },
     onEventMoved(info) {
       if (info.fromX === info.x && info.fromY === info.y) return
