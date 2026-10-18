@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     :model-value="modelValue"
-    title="选择图片 (pictures)"
+    :title="titleText"
     width="480px"
     append-to-body
     destroy-on-close
@@ -15,7 +15,7 @@
       highlight-current-row
       @current-change="onCurrent"
       @row-dblclick="confirm">
-      <el-table-column prop="name" label="文件名" min-width="220" show-overflow-tooltip />
+      <el-table-column prop="label" label="文件名" min-width="220" show-overflow-tooltip />
     </el-table>
     <template #footer>
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
@@ -35,12 +35,18 @@ export default {
   props: {
     modelValue: { type: Boolean, default: false },
     modelName: { type: String, default: '' },
+    folder: { type: String, default: 'pictures' },
+    dialogTitle: { type: String, default: '' },
+    allowNone: { type: Boolean, default: false },
   },
   emits: ['update:modelValue', 'confirm'],
   data() {
     return { query: '', rows: [], selected: null }
   },
   computed: {
+    titleText() {
+      return this.dialogTitle || `选择图片 (${this.folder})`
+    },
     filtered() {
       const q = (this.query || '').trim().toLowerCase()
       if (!q) return this.rows
@@ -71,9 +77,9 @@ export default {
           this.rows = out
           return
         }
-        const dir = path.join(root, 'img', 'pictures')
+        const dir = path.join(root, 'img', this.folder || 'pictures')
         if (!fs.existsSync(dir)) {
-          this.rows = out
+          this.rows = this.allowNone ? [{ name: '', label: '(无)' }] : out
           return
         }
         fs.readdirSync(dir).forEach((name) => {
@@ -81,9 +87,11 @@ export default {
           if (!IMAGE_EXT.includes(ext)) return
           const abs = path.join(dir, name)
           if (!fs.statSync(abs).isFile()) return
-          out.push({ name: path.basename(name, ext) })
+          const stem = path.basename(name, ext)
+          out.push({ name: stem, label: stem })
         })
         out.sort((a, b) => a.name.localeCompare(b.name))
+        if (this.allowNone) out.unshift({ name: '', label: '(无)' })
       } catch (e) {
         console.error(e)
       }
@@ -94,6 +102,7 @@ export default {
     },
     confirm() {
       if (!this.selected) return
+      if (!this.allowNone && !this.selected.name) return
       this.$emit('confirm', this.selected.name)
       this.$emit('update:modelValue', false)
     },

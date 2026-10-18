@@ -2,49 +2,53 @@
   <el-dialog
     :model-value="modelValue"
     title="显示选项"
-    width="480px"
+    width="560px"
     append-to-body
     destroy-on-close
     :close-on-click-modal="false"
     @update:model-value="$emit('update:modelValue', $event)">
-    <el-form size="small" label-width="88px">
-      <el-form-item label="选项">
-        <div class="choice-list">
-          <div v-for="(opt, i) in choices" :key="i" class="choice-row">
-            <el-input v-model="choices[i]" size="small" />
-            <el-button size="small" :disabled="choices.length <= 1" @click="choices.splice(i, 1)">删</el-button>
-          </div>
-          <el-button size="small" :disabled="choices.length >= 6" @click="choices.push('')">添加选项</el-button>
+    <div class="grid">
+      <div class="left">
+        <div class="sec-title">选项</div>
+        <div v-for="(opt, i) in slots" :key="i" class="choice-row">
+          <span class="idx">#{{ i + 1 }}</span>
+          <el-input v-model="slots[i]" size="small" />
         </div>
-      </el-form-item>
-      <el-form-item label="默认">
-        <el-select v-model="defaultType" style="width: 160px">
-          <el-option :value="-1" label="无" />
-          <el-option v-for="(c, i) in choices" :key="'d' + i" :value="i" :label="'选项 ' + (i + 1)" />
-        </el-select>
-      </el-form-item>
-      <el-form-item label="取消">
-        <el-select v-model="cancelType" style="width: 160px">
-          <el-option :value="-2" label="分支" />
-          <el-option :value="-1" label="禁止" />
-          <el-option v-for="(c, i) in choices" :key="'c' + i" :value="i" :label="'选项 ' + (i + 1)" />
-        </el-select>
-      </el-form-item>
-      <el-form-item label="窗口位置">
-        <el-select v-model="positionType" style="width: 140px">
-          <el-option :value="0" label="左" />
-          <el-option :value="1" label="中" />
-          <el-option :value="2" label="右" />
-        </el-select>
-      </el-form-item>
-      <el-form-item label="背景">
-        <el-select v-model="background" style="width: 140px">
-          <el-option :value="0" label="窗口" />
-          <el-option :value="1" label="暗淡" />
-          <el-option :value="2" label="透明" />
-        </el-select>
-      </el-form-item>
-    </el-form>
+      </div>
+      <div class="right">
+        <div class="field">
+          <div class="lab">背景</div>
+          <el-select v-model="background" style="width: 100%">
+            <el-option :value="0" label="窗口" />
+            <el-option :value="1" label="暗淡" />
+            <el-option :value="2" label="透明" />
+          </el-select>
+        </div>
+        <div class="field">
+          <div class="lab">窗口位置</div>
+          <el-select v-model="positionType" style="width: 100%">
+            <el-option :value="0" label="左侧" />
+            <el-option :value="1" label="中间" />
+            <el-option :value="2" label="右侧" />
+          </el-select>
+        </div>
+        <div class="field">
+          <div class="lab">默认</div>
+          <el-select v-model="defaultType" style="width: 100%">
+            <el-option :value="-1" label="无" />
+            <el-option v-for="n in 6" :key="'d' + n" :value="n - 1" :label="'选项 #' + n" />
+          </el-select>
+        </div>
+        <div class="field">
+          <div class="lab">取消</div>
+          <el-select v-model="cancelType" style="width: 100%">
+            <el-option :value="-2" label="分支" />
+            <el-option :value="-1" label="禁止" />
+            <el-option v-for="n in 6" :key="'c' + n" :value="n - 1" :label="'选项 #' + n" />
+          </el-select>
+        </div>
+      </div>
+    </div>
     <template #footer>
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
       <el-button type="primary" @click="ok">确定</el-button>
@@ -62,12 +66,11 @@ export default {
   emits: ['update:modelValue', 'confirm'],
   data() {
     return {
-      choices: ['是', '否'],
+      slots: ['是', '否', '', '', '', ''],
       defaultType: 0,
       cancelType: 1,
       positionType: 2,
       background: 0,
-      /** 编辑已有 102 时只改本行，不重建分支树 */
       editOnly: false,
     }
   },
@@ -83,38 +86,58 @@ export default {
   methods: {
     syncFromCommand() {
       const c = this.command
-      // MZ: [choices, cancelType, defaultType, positionType, background]
+      const next = ['', '', '', '', '', '']
       if (c && c.code === 102 && Array.isArray(c.parameters) && c.parameters.length) {
         const p = c.parameters
-        this.choices = Array.isArray(p[0]) && p[0].length ? [...p[0]] : ['是', '否']
+        const choices = Array.isArray(p[0]) ? p[0] : []
+        for (let i = 0; i < 6; i++) next[i] = choices[i] != null ? String(choices[i]) : ''
         let cancel = p[1] ?? 1
-        // 存 choices.length 表示「分支」
-        if (cancel >= this.choices.length) cancel = -2
+        if (cancel >= choices.length) cancel = -2
         this.cancelType = cancel
         this.defaultType = p[2] ?? 0
         this.positionType = p[3] ?? 2
         this.background = p[4] ?? 0
         this.editOnly = true
       } else {
-        this.choices = ['是', '否']
+        next[0] = '是'
+        next[1] = '否'
         this.defaultType = 0
         this.cancelType = 1
         this.positionType = 2
         this.background = 0
         this.editOnly = false
       }
+      this.slots = next
+    },
+    compactChoices() {
+      const opts = this.slots.map((s) => String(s || '')).filter((s) => s !== '')
+      if (!opts.length) opts.push('')
+      // 默认/取消按原槽位映射到压缩后的下标
+      const kept = []
+      this.slots.forEach((s, i) => {
+        if (String(s || '') !== '') kept.push(i)
+      })
+      let def = this.defaultType
+      if (def >= 0) {
+        const ni = kept.indexOf(def)
+        def = ni >= 0 ? ni : -1
+      }
+      let cancel = this.cancelType
+      if (cancel >= 0) {
+        const ni = kept.indexOf(cancel)
+        cancel = ni >= 0 ? ni : -1
+      }
+      return { opts, def, cancel }
     },
     ok() {
       const indent = (this.command && this.command.indent) || 0
-      const opts = this.choices.map((s) => String(s || ''))
-      if (!opts.length) opts.push('')
-      let cancel = this.cancelType
-      // 分支：存 choices.length，运行时会当作 -2，并带 403
+      const { opts, def, cancel: cancelRaw } = this.compactChoices()
+      let cancel = cancelRaw
       if (cancel === -2) cancel = opts.length
       const cmd102 = {
         code: 102,
         indent,
-        parameters: [opts, cancel, this.defaultType, this.positionType, this.background],
+        parameters: [opts, cancel, def, this.positionType, this.background],
       }
       if (this.editOnly) {
         this.$emit('confirm', [cmd102])
@@ -126,7 +149,7 @@ export default {
         commands.push({ code: 402, indent, parameters: [i, opts[i]] })
         commands.push({ code: 0, indent: indent + 1, parameters: [] })
       })
-      if (this.cancelType === -2) {
+      if (cancelRaw === -2) {
         commands.push({ code: 403, indent, parameters: [] })
         commands.push({ code: 0, indent: indent + 1, parameters: [] })
       }
@@ -139,14 +162,31 @@ export default {
 </script>
 
 <style scoped>
-.choice-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 180px;
+  gap: 16px;
+}
+.sec-title {
+  font-weight: 600;
+  margin-bottom: 8px;
 }
 .choice-row {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.idx {
+  width: 28px;
+  flex: 0 0 28px;
+  color: var(--app-muted, #666);
+}
+.field {
+  margin-bottom: 12px;
+}
+.lab {
+  font-size: 13px;
+  margin-bottom: 4px;
 }
 </style>

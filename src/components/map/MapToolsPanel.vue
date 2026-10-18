@@ -9,6 +9,11 @@
       <button type="button" class="mtp-close" title="关闭" @click="close">×</button>
     </div>
     <div class="mtp-body">
+      <div class="mtp-row mtp-view-toggles">
+        <el-checkbox :model-value="showGrid" @change="onGrid">网格</el-checkbox>
+        <el-checkbox :model-value="showRegions" @change="onRegions">Region</el-checkbox>
+        <el-checkbox :model-value="showEvents" @change="onEvents">事件</el-checkbox>
+      </div>
       <div class="mtp-row">
         <el-checkbox :model-value="mapCharOriginalSize" @change="onCharSize">
           事件行走图原尺寸渲染
@@ -67,6 +72,9 @@ export default {
       'mapCharOriginalSize',
       'previewWalkAnim',
       'showHyperlinks',
+      'showGrid',
+      'showRegions',
+      'showEvents',
     ]),
     effectiveVisible() {
       return this.mapToolsVisible && !this.databaseVisible
@@ -81,7 +89,36 @@ export default {
       }
     },
   },
+  watch: {
+    effectiveVisible(v) {
+      if (v) this.$nextTick(() => this.ensureOnScreen())
+    },
+  },
+  mounted() {
+    if (this.effectiveVisible) this.ensureOnScreen()
+  },
   methods: {
+    ensureOnScreen() {
+      const g = this.mapToolsGeom || {}
+      const w = g.w || 360
+      const h = g.h || 300
+      const x = Number.isFinite(g.x) ? g.x : 120
+      const y = Number.isFinite(g.y) ? g.y : 60
+      const vw = window.innerWidth || 0
+      const vh = window.innerHeight || 0
+      if (vw < 64 || vh < 64) return
+      const titleH = 28
+      const noIntersect = x >= vw || y >= vh || x + w <= 0 || y + h <= 0
+      const titleOff = y < 0 || x < 0 || y + titleH > vh || x + Math.min(w, 80) > vw
+      if (!noIntersect && !titleOff) return
+      this.$store.commit('setMapToolsGeom', {
+        x: Math.max(8, vw - w - 8),
+        y: Math.max(8, vh - h - 8),
+        w,
+        h,
+      })
+      this.$store.dispatch('persistMapTools')
+    },
     close() {
       this.$store.commit('setMapToolsVisible', false)
       this.$store.dispatch('persistMapTools')
@@ -94,6 +131,15 @@ export default {
     },
     onHyperlinks(v) {
       this.$store.dispatch('setShowHyperlinksPersist', v)
+    },
+    onGrid(v) {
+      this.$store.commit('setShowGrid', v)
+    },
+    onRegions(v) {
+      this.$store.commit('setShowRegions', v)
+    },
+    onEvents(v) {
+      this.$store.commit('setShowEvents', v)
     },
     onDragStart(e) {
       if (e.button !== 0) return
@@ -236,6 +282,12 @@ export default {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.mtp-view-toggles {
+  flex-wrap: wrap;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--app-border, #e5e5e5);
 }
 .mtp-q {
   display: inline-flex;

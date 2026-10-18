@@ -2,7 +2,8 @@
   <el-dialog
     :model-value="modelValue"
     :title="dialogTitle"
-    width="980px"
+    width="1180px"
+    :before-close="onBeforeClose"
     top="4vh"
     append-to-body
     destroy-on-close
@@ -25,10 +26,10 @@
       <div class="ev-top">
         <el-form inline size="small" label-width="48px" :disabled="isRefMode" class="ev-meta">
           <el-form-item label="名称">
-            <el-input v-model="draft.name" style="width: 160px" />
+            <el-input v-model="draft.name" style="width: 120px" />
           </el-form-item>
           <el-form-item label="备注">
-            <el-input v-model="draft.note" style="width: 220px" />
+            <el-input v-model="draft.note" style="width: 140px" />
           </el-form-item>
         </el-form>
         <div v-if="!isRefMode" class="ev-page-ops">
@@ -59,48 +60,27 @@
             <el-form size="small" label-width="0" :disabled="isRefMode" class="ev-cond">
               <div class="ev-cond-row">
                 <el-checkbox v-model="currentPage.conditions.switch1Valid">开关</el-checkbox>
-                <el-input-number
+                <id-name-field
                   v-model="currentPage.conditions.switch1Id"
-                  :min="1"
-                  :disabled="!currentPage.conditions.switch1Valid"
-                  controls-position="right"
-                  size="small" />
-                <el-button
-                  size="small"
-                  :disabled="!currentPage.conditions.switch1Valid"
-                  @click="openPicker('switch', 'switch1Id')">
-                  ...
-                </el-button>
+                  type="switch"
+                  width="160px"
+                  :disabled="!currentPage.conditions.switch1Valid" />
               </div>
               <div class="ev-cond-row">
                 <el-checkbox v-model="currentPage.conditions.switch2Valid">开关</el-checkbox>
-                <el-input-number
+                <id-name-field
                   v-model="currentPage.conditions.switch2Id"
-                  :min="1"
-                  :disabled="!currentPage.conditions.switch2Valid"
-                  controls-position="right"
-                  size="small" />
-                <el-button
-                  size="small"
-                  :disabled="!currentPage.conditions.switch2Valid"
-                  @click="openPicker('switch', 'switch2Id')">
-                  ...
-                </el-button>
+                  type="switch"
+                  width="160px"
+                  :disabled="!currentPage.conditions.switch2Valid" />
               </div>
               <div class="ev-cond-row">
                 <el-checkbox v-model="currentPage.conditions.variableValid">变量</el-checkbox>
-                <el-input-number
+                <id-name-field
                   v-model="currentPage.conditions.variableId"
-                  :min="1"
-                  :disabled="!currentPage.conditions.variableValid"
-                  controls-position="right"
-                  size="small" />
-                <el-button
-                  size="small"
-                  :disabled="!currentPage.conditions.variableValid"
-                  @click="openPicker('variable', 'variableId')">
-                  ...
-                </el-button>
+                  type="variable"
+                  width="160px"
+                  :disabled="!currentPage.conditions.variableValid" />
                 <span>≥</span>
                 <el-input-number
                   v-model="currentPage.conditions.variableValue"
@@ -152,7 +132,7 @@
 
           <fieldset class="ev-box ev-image-box">
             <legend>图像</legend>
-            <div class="ev-char-preview" title="点击编辑图像" @click="!isRefMode && (imageEditVisible = true)">
+            <div class="ev-char-preview" title="点击编辑图像" @click="!isRefMode && openCharacterPicker()">
               <canvas ref="charCanvas" width="96" height="96" />
             </div>
           </fieldset>
@@ -164,7 +144,13 @@
                 <el-select v-model="currentPage.moveType" style="width: 120px">
                   <el-option v-for="o in moveTypeOptions" :key="o.value" :label="o.label" :value="o.value" />
                 </el-select>
-                <el-button size="small" :disabled="currentPage.moveType !== 3" class="ml">路线...</el-button>
+                <el-button
+                  size="small"
+                  :disabled="currentPage.moveType !== 3"
+                  class="ml"
+                  @click="openMoveRoute">
+                  路线...
+                </el-button>
               </el-form-item>
               <el-form-item label="移动速度">
                 <el-select v-model="currentPage.moveSpeed" style="width: 140px">
@@ -211,10 +197,17 @@
     </div>
 
     <template #footer>
-      <el-button @click="onVisible(false)">{{ isRefMode ? '关闭' : '取消' }}</el-button>
+      <el-button @click="onCancel">{{ isRefMode ? '关闭' : '取消' }}</el-button>
       <el-button v-if="!isRefMode" @click="apply">应用</el-button>
       <el-button v-if="!isRefMode" type="primary" @click="confirm">确定</el-button>
     </template>
+
+    <move-route-editor
+      v-model="moveRouteVisible"
+      :show-target="false"
+      :show-wait="false"
+      :route="currentPage && currentPage.moveRoute"
+      @confirm="onMoveRouteConfirm" />
 
     <id-name-picker-dialog
       v-model="pickerVisible"
@@ -222,20 +215,24 @@
       :model-id="pickerModelId"
       @confirm="onPickerConfirm" />
 
+    <character-sheet-picker-dialog
+      v-model="charPickerVisible"
+      pick-frame
+      :model-name="currentPage && currentPage.image ? currentPage.image.characterName : ''"
+      :model-index="currentPage && currentPage.image ? currentPage.image.characterIndex : 0"
+      :model-pattern="currentPage && currentPage.image ? currentPage.image.pattern : 1"
+      :model-direction="currentPage && currentPage.image ? currentPage.image.direction : 2"
+      :model-tile-id="currentPage && currentPage.image ? currentPage.image.tileId : 0"
+      @confirm="onCharacterPicked" />
+
     <el-dialog
       v-model="imageEditVisible"
-      title="图像"
-      width="400px"
+      title="图像选项"
+      width="360px"
       append-to-body
       :close-on-click-modal="false"
       @closed="paintCharPreview">
       <el-form v-if="currentPage" size="small" label-width="72px">
-        <el-form-item label="文件">
-          <el-input v-model="currentPage.image.characterName" placeholder="img/characters 文件名" />
-        </el-form-item>
-        <el-form-item label="索引">
-          <el-input-number v-model="currentPage.image.characterIndex" :min="0" :max="7" />
-        </el-form-item>
         <el-form-item label="方向">
           <el-select v-model="currentPage.image.direction" style="width: 100px">
             <el-option :value="2" label="下" />
@@ -247,6 +244,9 @@
         <el-form-item label="图案">
           <el-input-number v-model="currentPage.image.pattern" :min="0" :max="2" />
         </el-form-item>
+        <el-form-item>
+          <el-button size="small" @click="charPickerVisible = true">更换行走图…</el-button>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button type="primary" @click="imageEditVisible = false">完成</el-button>
@@ -256,9 +256,10 @@
 </template>
 
 <script>
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import DataManager from '@/utils/DataManager'
 import { fs, path, isNw } from '@/utils/nw'
+import { isBigCharacter, imageAbsPath, loadImageFile, tileIdToCell, TILE_PX } from '@/utils/imgAssets'
 import {
   createEmptyPage,
   TRIGGER_OPTIONS,
@@ -268,11 +269,20 @@ import {
   MOVE_FREQ_OPTIONS,
 } from './eventDefaults'
 import IdNamePickerDialog from './pickers/IdNamePickerDialog.vue'
+import IdNameField from '@/components/database/shared/IdNameField.vue'
+import CharacterSheetPickerDialog from './pickers/CharacterSheetPickerDialog.vue'
 import EventCommandListEditor from './EventCommandListEditor.vue'
+import MoveRouteEditor from './MoveRouteEditor.vue'
 
 export default {
   name: 'EventEditorDialog',
-  components: { IdNamePickerDialog, EventCommandListEditor },
+  components: {
+    IdNamePickerDialog,
+    IdNameField,
+    CharacterSheetPickerDialog,
+    EventCommandListEditor,
+    MoveRouteEditor,
+  },
   props: {
     modelValue: { type: Boolean, default: false },
     event: { type: Object, default: null },
@@ -293,6 +303,8 @@ export default {
       pickerType: 'switch',
       pickerField: '',
       imageEditVisible: false,
+      charPickerVisible: false,
+      moveRouteVisible: false,
       _charImg: null,
     }
   },
@@ -348,6 +360,8 @@ export default {
         this.draft.pages = [createEmptyPage()]
       }
       this.pageIndex = 0
+      this._snapshot = JSON.stringify(this.draft)
+      this._closing = false
       this.$nextTick(() => this.paintCharPreview())
     },
     addPage() {
@@ -383,6 +397,63 @@ export default {
         this.currentPage.conditions[this.pickerField] = id
       }
     },
+    openCharacterPicker() {
+      this.charPickerVisible = true
+    },
+    openMoveRoute() {
+      if (!this.currentPage || this.currentPage.moveType !== 3 || this.isRefMode) return
+      if (!this.currentPage.moveRoute) {
+        this.currentPage.moveRoute = {
+          list: [{ code: 0, parameters: [] }],
+          repeat: true,
+          skippable: false,
+          wait: false,
+        }
+      }
+      this.moveRouteVisible = true
+    },
+    onMoveRouteConfirm({ route }) {
+      if (!this.currentPage || !route) return
+      this.currentPage.moveRoute = route
+    },
+    onCharacterPicked({ name, index, pattern, direction, tileId }) {
+      if (!this.currentPage || !this.currentPage.image) return
+      const image = this.currentPage.image
+      if (tileId > 0) {
+        image.tileId = tileId
+        image.characterName = ''
+        image.characterIndex = 0
+      } else {
+        image.tileId = 0
+        image.characterName = name || ''
+        image.characterIndex = index || 0
+        if (pattern != null) image.pattern = pattern
+        if (direction != null) image.direction = direction
+      }
+      this.$nextTick(() => this.paintCharPreview())
+    },
+    isDirty() {
+      if (!this.draft || this.isRefMode) return false
+      return JSON.stringify(this.draft) !== this._snapshot
+    },
+    tryDismiss() {
+      if (!this.isDirty()) return Promise.resolve(true)
+      const ui = this.$store.getters.editorUi || {}
+      if (ui.confirmDiscardEvent === false) return Promise.resolve(true)
+      return ElMessageBox.confirm('放弃对这个事件的修改？', '事件编辑器', {
+        confirmButtonText: '放弃',
+        cancelButtonText: '继续编辑',
+        type: 'warning',
+      }).then(() => true).catch(() => false)
+    },
+    onBeforeClose(done) {
+      this.tryDismiss().then((ok) => {
+        if (ok) done()
+      })
+    },
+    async onCancel() {
+      if (await this.tryDismiss()) this.$emit('update:modelValue', false)
+    },
     async paintCharPreview() {
       const canvas = this.$refs.charCanvas
       if (!canvas || !this.currentPage) return
@@ -397,13 +468,17 @@ export default {
         }
       }
       const imgData = this.currentPage.image
+      if (imgData && imgData.tileId > 0) {
+        await this.paintTilePreview(ctx, canvas, imgData.tileId)
+        return
+      }
       const name = imgData && imgData.characterName
       if (!name || !isNw || !fs || !path || !this.workRoot) return
       const file = path.join(this.workRoot, 'img', 'characters', name + '.png')
       if (!fs.existsSync(file)) return
       const img = await this.loadImage(file)
       if (!img) return
-      const big = name.startsWith('$') || name.startsWith('!$')
+      const big = isBigCharacter(name)
       const cw = big ? img.width / 3 : img.width / 12
       const ch = big ? img.height / 4 : img.height / 8
       const index = imgData.characterIndex || 0
@@ -417,6 +492,26 @@ export default {
       const dw = cw * scale
       const dh = ch * scale
       ctx.drawImage(img, sx, sy, cw, ch, (canvas.width - dw) / 2, canvas.height - dh, dw, dh)
+    },
+    async paintTilePreview(ctx, canvas, tileId) {
+      const mapId = this.$store.getters.selectedMapId
+      if (!mapId) return
+      const map = DataManager.$loadDataSync(`Map${String(mapId).padStart(3, '0')}`, false, false)
+      const tilesets = DataManager.$loadDataSync('Tilesets', false, false) || []
+      const ts = map && tilesets[map.tilesetId]
+      const names = (ts && ts.tilesetNames) || []
+      const set = tileId >= 768 ? 8 : tileId >= 512 ? 7 : tileId >= 256 ? 6 : 5
+      const fileName = names[set]
+      if (!fileName) return
+      const img = await loadImageFile(imageAbsPath('tilesets', fileName))
+      if (!img) return
+      const cell = tileIdToCell(tileId)
+      const sx = cell.col * TILE_PX
+      const sy = cell.row * TILE_PX
+      const scale = Math.min(canvas.width / TILE_PX, canvas.height / TILE_PX)
+      const dw = TILE_PX * scale
+      const dh = TILE_PX * scale
+      ctx.drawImage(img, sx, sy, TILE_PX, TILE_PX, (canvas.width - dw) / 2, canvas.height - dh, dw, dh)
     },
     loadImage(file) {
       return new Promise((resolve) => {
@@ -449,6 +544,7 @@ export default {
     },
     apply() {
       this.emitDraft(false)
+      this._snapshot = JSON.stringify(this.draft)
     },
     confirm() {
       this.emitDraft(true)
@@ -479,15 +575,30 @@ export default {
 }
 .ev-top {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
+  min-width: 0;
+}
+.ev-meta {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  margin-bottom: 0;
+}
+.ev-meta :deep(.el-form-item) {
+  margin-bottom: 0;
+  margin-right: 8px;
 }
 .ev-page-ops {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 4px;
+  flex-shrink: 0;
+}
+.ev-page-ops :deep(.el-button) {
+  padding: 5px 8px;
 }
 .ev-page-tabs {
   display: flex;

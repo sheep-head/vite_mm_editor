@@ -17,17 +17,11 @@
       </template>
     </el-form-item>
     <el-form-item v-else label="变量">
-      <el-input-number v-model="local.actorId" :min="1" controls-position="right" />
-      <el-button size="small" @click="varPickerVisible = true">...</el-button>
+      <id-name-field :model-value="local.actorId" type="variable" width="200px" @update:model-value="onActor" />
     </el-form-item>
     <id-name-picker-dialog
       v-model="pickerVisible"
       type="actor"
-      :model-id="local.actorId"
-      @confirm="onActor" />
-    <id-name-picker-dialog
-      v-model="varPickerVisible"
-      type="variable"
       :model-id="local.actorId"
       @confirm="onActor" />
   </div>
@@ -35,6 +29,7 @@
 
 <script>
 import IdNamePickerDialog from './IdNamePickerDialog.vue'
+import IdNameField from '@/components/database/shared/IdNameField.vue'
 
 /**
  * MZ iterateActorEx: params[0]=0 固定 / 1 变量；params[1]=0 全体或角色ID/变量ID
@@ -42,7 +37,7 @@ import IdNamePickerDialog from './IdNamePickerDialog.vue'
  */
 export default {
   name: 'ActorTargetFields',
-  components: { IdNamePickerDialog },
+  components: { IdNamePickerDialog, IdNameField },
   props: {
     modelValue: {
       type: Object,
@@ -51,7 +46,7 @@ export default {
   },
   emits: ['update:modelValue'],
   data() {
-    return { pickerVisible: false, varPickerVisible: false }
+    return { pickerVisible: false }
   },
   computed: {
     local: {

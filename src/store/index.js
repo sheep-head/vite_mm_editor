@@ -1,6 +1,6 @@
 import { createStore } from 'vuex'
 import DataManager from '@/utils/DataManager'
-import { loadSettings, saveSettings } from '@/utils/appSettings'
+import { loadSettings, saveSettings, DEFAULT_EDITOR_UI, applyEditorUiCss } from '@/utils/appSettings'
 
 const CHAR_ORIG_KEY = 'editor-map-char-original-size'
 
@@ -32,6 +32,27 @@ function readMapToolsFromSettings() {
   return mt
 }
 
+function readEditorUi() {
+  const s = loadSettings()
+  const raw = s.editorUi || {}
+  const ui = { ...DEFAULT_EDITOR_UI, ...raw }
+  ui.blockedMapIds = Array.isArray(raw.blockedMapIds)
+    ? raw.blockedMapIds.map((n) => Number(n)).filter((n) => n > 0)
+    : []
+  return ui
+}
+
+let _uiTimer = null
+function persistEditorUi(editorUi) {
+  if (_uiTimer) clearTimeout(_uiTimer)
+  _uiTimer = setTimeout(() => {
+    saveSettings({ editorUi: { ...editorUi } })
+  }, 200)
+}
+
+const initialEditorUi = readEditorUi()
+applyEditorUiCss(initialEditorUi)
+
 let _saveTimer = null
 function persistMapTools(mapTools) {
   if (_saveTimer) clearTimeout(_saveTimer)
@@ -42,13 +63,18 @@ function persistMapTools(mapTools) {
 
 const initialMapTools = readMapToolsFromSettings()
 
+function readEditorMode() {
+  const mode = loadSettings().editorMode
+  return mode === 'event' ? 'event' : 'map'
+}
+
 const store = createStore({
   state: {
     mapInfos: null,
     actors: null,
     animations: null,
     editor: {
-      mode: 'map',
+      mode: readEditorMode(),
       editLayer: 'auto',
       showGrid: false,
       showRegions: false,
@@ -57,6 +83,7 @@ const store = createStore({
       zoomRequest: null,
       selectedMapId: 0,
       paletteTab: 'A',
+      paintTool: 'pencil',
       databaseVisible: false,
       mapToolsVisible: !!initialMapTools.visible,
       mapToolsGeom: {
@@ -69,6 +96,7 @@ const store = createStore({
       previewWalkAnim: !!initialMapTools.previewWalkAnim,
       showHyperlinks: !!initialMapTools.showHyperlinks,
       focusEventRequest: null,
+      editorUi: initialEditorUi,
     },
   },
   getters: {
@@ -108,6 +136,9 @@ const store = createStore({
     paletteTab(state) {
       return state.editor.paletteTab
     },
+    paintTool(state) {
+      return state.editor.paintTool || 'pencil'
+    },
     databaseVisible(state) {
       return state.editor.databaseVisible
     },
@@ -129,6 +160,9 @@ const store = createStore({
     focusEventRequest(state) {
       return state.editor.focusEventRequest
     },
+    editorUi(state) {
+      return state.editor.editorUi
+    },
     mapToolsPayload(state) {
       const e = state.editor
       return {
@@ -149,8 +183,13 @@ const store = createStore({
       state.actors = payload.actors
       state.animations = payload.animations
     },
+    setMapInfos(state, list) {
+      state.mapInfos = list
+    },
     setEditorMode(state, mode) {
-      state.editor.mode = mode
+      const next = mode === 'event' ? 'event' : 'map'
+      state.editor.mode = next
+      saveSettings({ editorMode: next })
     },
     setEditLayer(state, layer) {
       state.editor.editLayer = layer
@@ -182,6 +221,10 @@ const store = createStore({
         state.editor.showRegions = true
       }
     },
+    setPaintTool(state, tool) {
+      const ok = ['pencil', 'rect', 'ellipse', 'fill', 'shadow']
+      state.editor.paintTool = ok.includes(tool) ? tool : 'pencil'
+    },
     setDatabaseVisible(state, v) {
       state.editor.databaseVisible = !!v
     },
@@ -210,6 +253,19 @@ const store = createStore({
     },
     clearFocusEventRequest(state) {
       state.editor.focusEventRequest = null
+    },
+    setEditorUi(state, partial) {
+      const prev = state.editor.editorUi || {}
+      const next = { ...prev, ...partial }
+      state.editor.editorUi = next
+      // 仅滚动条相关 CSS 变化时才写变量，避免透明度等无关改动触发布局/ResizeObserver
+      if (
+        prev.scrollSize !== next.scrollSize ||
+        prev.scrollTrack !== next.scrollTrack ||
+        prev.scrollThumb !== next.scrollThumb
+      ) {
+        applyEditorUiCss(next)
+      }
     },
   },
   actions: {
@@ -242,6 +298,10 @@ const store = createStore({
     closeMapTools({ commit, dispatch }) {
       commit('setMapToolsVisible', false)
       dispatch('persistMapTools')
+    },
+    updateEditorUi({ commit, state }, partial) {
+      commit('setEditorUi', partial)
+      persistEditorUi(state.editor.editorUi)
     },
     requestFocusEvent({ commit }, payload) {
       // { mapId, eventId }

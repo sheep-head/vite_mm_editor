@@ -2,36 +2,31 @@
   <el-dialog
     :model-value="modelValue"
     title="增减防具"
-    width="420px"
+    width="440px"
     append-to-body
     destroy-on-close
     :close-on-click-modal="false"
     @update:model-value="$emit('update:modelValue', $event)">
-    <el-form size="small" label-width="88px">
-      <el-form-item label="防具">
-        <el-input-number v-model="armorId" :min="1" controls-position="right" />
-        <el-button size="small" @click="pickerVisible = true">...</el-button>
-      </el-form-item>
-      <operate-value-fields v-model="ov" />
-      <el-form-item label="含装备中">
-        <el-checkbox v-model="includeEquip">包含装备中的防具</el-checkbox>
-      </el-form-item>
-    </el-form>
+    <div class="pick">
+      <div class="lab">防具:</div>
+      <id-name-field v-model="armorId" type="armor" width="320px" />
+    </div>
+    <operate-value-fields v-model="ov" />
+    <el-checkbox v-model="includeEquip" class="extra">包括装备</el-checkbox>
     <template #footer>
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
       <el-button type="primary" @click="ok">确定</el-button>
     </template>
-    <id-name-picker-dialog v-model="pickerVisible" type="armor" :model-id="armorId" @confirm="(id) => (armorId = id)" />
   </el-dialog>
 </template>
 
 <script>
-import IdNamePickerDialog from '../pickers/IdNamePickerDialog.vue'
+import IdNameField from '@/components/database/shared/IdNameField.vue'
 import OperateValueFields from '../pickers/OperateValueFields.vue'
 
 export default {
   name: 'Cmd128Armor',
-  components: { IdNamePickerDialog, OperateValueFields },
+  components: { IdNameField, OperateValueFields },
   props: {
     modelValue: { type: Boolean, default: false },
     command: { type: Object, default: null },
@@ -42,7 +37,6 @@ export default {
       armorId: 1,
       ov: { operation: 0, operandType: 0, operand: 1 },
       includeEquip: false,
-      pickerVisible: false,
     }
   },
   watch: {
@@ -71,3 +65,16 @@ export default {
   },
 }
 </script>
+
+<style scoped>
+.pick {
+  margin-bottom: 10px;
+}
+.lab {
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+.extra {
+  margin-top: 10px;
+}
+</style>

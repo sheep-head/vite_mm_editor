@@ -1,31 +1,41 @@
 <template>
-  <el-dialog :model-value="modelValue" title="更改战败音效" width="440px" append-to-body destroy-on-close :close-on-click-modal="false" @update:model-value="$emit('update:modelValue', $event)">
-    <el-form size="small" label-width="72px"><audio-params-form v-model="audio" folder="me" /></el-form>
-    <template #footer>
-      <el-button @click="$emit('update:modelValue', false)">取消</el-button>
-      <el-button type="primary" @click="ok">确定</el-button>
-    </template>
-  </el-dialog>
+  <audio-file-picker-dialog
+    :model-value="modelValue"
+    dialog-title="更改失败音乐"
+    folder="me"
+    :model-name="audio.name"
+    :model-volume="audio.volume"
+    :model-pitch="audio.pitch"
+    :model-pan="audio.pan"
+    @update:model-value="$emit('update:modelValue', $event)"
+    @confirm="onConfirm" />
 </template>
 <script>
-import AudioParamsForm from '../pickers/AudioParamsForm.vue'
+import AudioFilePickerDialog from '../pickers/AudioFilePickerDialog.vue'
+function defAudio() { return { name: '', volume: 90, pitch: 100, pan: 0 } }
 export default {
   name: 'Cmd139DefeatMe',
-  components: { AudioParamsForm },
+  components: { AudioFilePickerDialog },
   props: { modelValue: Boolean, command: Object },
   emits: ['update:modelValue', 'confirm'],
-  data() { return { audio: { name: '', volume: 90, pitch: 100, pan: 0 } } },
+  data() { return { audio: defAudio() } },
   watch: {
-    modelValue: { immediate: true, handler(v) {
-      if (!v) return
-      const a = ((this.command && this.command.parameters) || [])[0] || {}
-      this.audio = { name: a.name || '', volume: a.volume ?? 90, pitch: a.pitch ?? 100, pan: a.pan ?? 0 }
-    }},
+    modelValue: {
+      immediate: true,
+      handler(v) {
+        if (!v) return
+        const a = ((this.command && this.command.parameters) || [])[0] || {}
+        this.audio = { name: a.name || '', volume: a.volume ?? 90, pitch: a.pitch ?? 100, pan: a.pan ?? 0 }
+      },
+    },
   },
   methods: {
-    ok() {
-      this.$emit('confirm', [{ code: 139, indent: (this.command && this.command.indent) || 0, parameters: [{ ...this.audio }] }])
-      this.$emit('update:modelValue', false)
+    onConfirm(a) {
+      this.$emit('confirm', [{
+        code: 139,
+        indent: (this.command && this.command.indent) || 0,
+        parameters: [{ name: a.name || '', volume: a.volume, pitch: a.pitch, pan: a.pan }],
+      }])
     },
   },
 }

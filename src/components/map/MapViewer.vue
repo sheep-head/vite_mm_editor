@@ -7,30 +7,33 @@
           @mousedown="onMouseDown"
           @mousemove="onMouseMove"
           @mouseup="onMouseUp"
-          @mouseleave="onMouseUp"
+          @mouseleave="onMouseLeave"
           @dblclick="onDblClick"
           @wheel.prevent="onWheel"
           @contextmenu="onContextMenu" />
         <div v-if="!mapId" class="map-empty">请从左侧地图列表选择地图</div>
         <div v-else-if="loadError" class="map-empty">{{ loadError }}</div>
+        <!-- 覆盖式滚动条：不挤占画布 -->
+        <div
+          v-show="scrollMetrics.showV"
+          ref="vScroll"
+          class="map-scroll map-scroll-v"
+          :class="{ 'has-h': scrollMetrics.showH }"
+          @scroll="onVScroll">
+          <div class="map-scroll-spacer" :style="{ height: scrollMetrics.contentH + 'px' }" />
+        </div>
+        <div
+          v-show="scrollMetrics.showH"
+          ref="hScroll"
+          class="map-scroll map-scroll-h"
+          :class="{ 'has-v': scrollMetrics.showV }"
+          @scroll="onHScroll">
+          <div class="map-scroll-spacer" :style="{ width: scrollMetrics.contentW + 'px' }" />
+        </div>
+        <div
+          v-show="scrollMetrics.showH && scrollMetrics.showV"
+          class="map-scroll-corner" />
       </div>
-      <div
-        v-show="scrollMetrics.showV"
-        ref="vScroll"
-        class="map-scroll map-scroll-v"
-        @scroll="onVScroll">
-        <div class="map-scroll-spacer" :style="{ height: scrollMetrics.contentH + 'px' }" />
-      </div>
-    </div>
-    <div class="map-scroll-row" v-show="scrollMetrics.showH || scrollMetrics.showV">
-      <div
-        v-show="scrollMetrics.showH"
-        ref="hScroll"
-        class="map-scroll map-scroll-h"
-        @scroll="onHScroll">
-        <div class="map-scroll-spacer" :style="{ width: scrollMetrics.contentW + 'px' }" />
-      </div>
-      <div v-show="scrollMetrics.showV" class="map-scroll-corner" />
     </div>
   </div>
 </template>
@@ -39,6 +42,7 @@
 import { mapGetters } from 'vuex'
 import DataManager from '@/utils/DataManager'
 import { fs, path, isNw } from '@/utils/nw'
+import { getMapBgSkinPath, isMapEmptyCheckerboard } from '@/utils/appSettings'
 import {
   FLOOR_AUTOTILE_TABLE,
   WALL_AUTOTILE_TABLE,
@@ -52,15 +56,18 @@ import {
   isTileA5,
   getAutotileKind,
   getAutotileShape,
+  isLowerTile,
+  refreshAutotileNeighbors,
 } from './mapAutotile'
+import { tileSetOfId } from '@/utils/imgAssets'
 import { isEventRef } from './eventRef'
 
 const DIM_ALPHA = 0.35
 const WALK_ANIM_FPS = 10
 /** 红色定位光圈：单次收缩周期 */
 const FOCUS_RING_CYCLE_MS = 800
-/** 启动后至少播放这么久，期间禁止被 scroll/click 取消 */
-const FOCUS_RING_MIN_MS = 2000
+/** untilAction：极短保护，避免同一次点击立刻清掉 */
+const FOCUS_RING_MIN_MS = 80
 
 export default {
   name: 'MapViewer',
@@ -71,6 +78,8 @@ export default {
     showGrid: { type: Boolean, default: false },
     showRegions: { type: Boolean, default: false },
     showEvents: { type: Boolean, default: true },
+    paintEnabled: { type: Boolean, default: false },
+    brush: { type: Object, default: null },
   },
   emits: [
     'tile-select',
@@ -82,6 +91,8 @@ export default {
     'event-moved',
     'event-context',
     'map-dirty',
+    'paint-stroke',
+    'brush-pick',
   ],
   data() {
     return {
@@ -114,6 +125,14 @@ export default {
       selectedEventId: 0,
       draggingEventId: 0,
       eventDragOrigin: null,
+      isPainting: false,
+      paintErase: false,
+      paintLastCell: null,
+      paintBefore: null,
+      paintDirtyCells: null,
+      isShapeDrag: false,
+      shapePreview: null,
+      isEyedrop: false,
       startMarkers: {
         player: { mapId: 0, x: 0, y: 0 },
         boat: { mapId: 0, x: 0, y: 0, characterName: '', characterIndex: 0 },
@@ -138,6 +157,9 @@ export default {
       'previewWalkAnim',
       'showHyperlinks',
       'focusEventRequest',
+      'editorUi',
+      'paintTool',
+      'paletteTab',
     ]),
     workRoot() {
       if (this.projectPath) return this.projectPath
@@ -223,7 +245,11 @@ export default {
       this.render()
     },
     editorMode() {
+      this.cancelShape()
       this.render()
+    },
+    paintTool() {
+      this.cancelShape()
     },
     mapCharOriginalSize() {
       this.refreshEventsLayer()
@@ -251,6 +277,39 @@ export default {
       else if (req === 'fit') this.fitToView()
       this.$store.commit('clearZoomRequest')
     },
+    'editorUi.mapBgSkin': {
+      immediate: true,
+      handler(name) {
+        this.loadMapBgSkin(name)
+      },
+    },
+    // 勿 deep 监听整个 editorUi：写盘/回写会连带触发，且 applyEditorUiCss 可能引起 ResizeObserver 重入 render
+    'editorUi.mapBgSkinOpacity'() {
+      this.render()
+    },
+    'editorUi.mapEmptyColor'() {
+      this.render()
+    },
+    'editorUi.gridColor'() {
+      this.render()
+    },
+    'editorUi.gridWidth'() {
+      this.render()
+    },
+    'editorUi.mapEdgeVisible'() {
+      this.render()
+    },
+    'editorUi.mapEdgeColor'() {
+      this.render()
+    },
+    'editorUi.eventFillColor'() {
+      this.refreshEventsLayer()
+      this.render()
+    },
+    'editorUi.eventLargeFit'() {
+      this.refreshEventsLayer()
+      this.render()
+    },
   },
   mounted() {
     this.canvas = this.$refs.canvas
@@ -270,12 +329,19 @@ export default {
   created() {
     this._focusRing = null
     this._focusRaf = 0
+    this._focusTimer = 0
     this._pendingFocus = null
+    this._mapBgImg = null
+    this._mapBgName = ''
+    this._rendering = false
+    this._panFrame = 0
   },
   beforeUnmount() {
     window.removeEventListener('resize', this._onResize)
     if (this._ro) this._ro.disconnect()
     if (this._raf) cancelAnimationFrame(this._raf)
+    if (this._panFrame) cancelAnimationFrame(this._panFrame)
+    if (this._focusTimer) clearTimeout(this._focusTimer)
     this.clearFocusRing(true)
     this.stopWalkAnim(false)
   },
@@ -493,17 +559,27 @@ export default {
 
     focusEventRing(eventId) {
       if (!eventId) return
+      if (this._focusTimer) {
+        clearTimeout(this._focusTimer)
+        this._focusTimer = 0
+      }
+      const ui = this.editorUi || {}
+      const timed = ui.focusRingMode === 'timed'
+      const sec = Math.max(0.5, Number(ui.focusRingSeconds) || 2)
+      // 先停旧动画再开新环，避免定时器与 RAF 抢清导致崩溃
+      this.stopFocusRingAnim()
       this._focusRing = {
         eventId,
         start: Date.now(),
         active: true,
+        endAt: timed ? Date.now() + sec * 1000 : 0,
       }
       this.startFocusRingAnim()
       this.render()
     },
 
     /**
-     * @param {boolean} [force] 换地图 / 卸载时强制清除；否则启动后 2 秒内不可取消
+     * @param {boolean} [force] 换地图 / 卸载 / 周期结束后强制清除
      */
     clearFocusRing(force = false) {
       if (!this._focusRing) return
@@ -511,19 +587,115 @@ export default {
         const elapsed = Date.now() - this._focusRing.start
         if (elapsed < FOCUS_RING_MIN_MS) return
       }
-      this._focusRing = null
+      if (this._focusTimer) {
+        clearTimeout(this._focusTimer)
+        this._focusTimer = 0
+      }
       this.stopFocusRingAnim()
-      this.render()
+      this._focusRing = null
+      try {
+        this.render()
+      } catch (e) {
+        console.error(e)
+      }
+    },
+
+    loadMapBgSkin(name) {
+      this._mapBgName = name || ''
+      this._mapBgImg = null
+      if (!name || !isNw || !fs) {
+        this.render()
+        return
+      }
+      const abs = getMapBgSkinPath(name)
+      if (!abs || !fs.existsSync(abs)) {
+        this.render()
+        return
+      }
+      const img = new Image()
+      const token = name
+      img.onload = () => {
+        if (this._mapBgName !== token) return
+        this._mapBgImg = img
+        this.render()
+      }
+      img.onerror = () => {
+        if (this._mapBgName !== token) return
+        this._mapBgImg = null
+        this.render()
+      }
+      // 文件名已唯一；再加 query 防止偶发 file URL 缓存
+      img.src = 'file:///' + abs.replace(/\\/g, '/') + '?t=' + encodeURIComponent(name)
+    },
+
+    paintViewportBackground() {
+      if (!this.canvas || !this.ctx) return
+      const w = this.canvas.width
+      const h = this.canvas.height
+      if (w < 1 || h < 1) return
+      const ui = this.editorUi || {}
+      if (isMapEmptyCheckerboard(ui.mapEmptyColor)) {
+        const s = 12
+        for (let y = 0; y < h; y += s) {
+          for (let x = 0; x < w; x += s) {
+            this.ctx.fillStyle = ((x / s + y / s) % 2 === 0) ? '#c8c8c8' : '#ffffff'
+            this.ctx.fillRect(x, y, s, s)
+          }
+        }
+      } else {
+        this.ctx.fillStyle = ui.mapEmptyColor || '#1a1a1a'
+        this.ctx.fillRect(0, 0, w, h)
+      }
+      const img = this._mapBgImg
+      if (img && img.complete && img.width) {
+        const opacity = Math.max(0, Math.min(1, Number(ui.mapBgSkinOpacity)))
+        const alpha = Number.isFinite(opacity) ? opacity : 1
+        const scale = Math.max(w / img.width, h / img.height)
+        const dw = img.width * scale
+        const dh = img.height * scale
+        this.ctx.save()
+        this.ctx.globalAlpha = alpha
+        this.ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh)
+        this.ctx.restore()
+      }
     },
 
     startFocusRingAnim() {
       if (this._focusRaf) return
       const tick = () => {
-        if (!this._focusRing || !this._focusRing.active) {
+        const ring = this._focusRing
+        if (!ring || !ring.active) {
           this._focusRaf = 0
           return
         }
-        this.render()
+        // 倒计时到期：播完「当前这一轮收缩到格子」(t→1) 立刻释放，切勿进入下一轮最外圈
+        if (ring.endAt && Date.now() >= ring.endAt) {
+          const elapsed = Date.now() - ring.start
+          const cycleIndex = Math.floor(elapsed / FOCUS_RING_CYCLE_MS)
+          const phase = elapsed % FOCUS_RING_CYCLE_MS
+          if (ring.finishCycleIndex == null) ring.finishCycleIndex = cycleIndex
+          const done =
+            cycleIndex > ring.finishCycleIndex ||
+            (cycleIndex === ring.finishCycleIndex && phase >= FOCUS_RING_CYCLE_MS - 20)
+          if (done) {
+            this._focusRaf = 0
+            this._focusRing = null
+            try {
+              this.render()
+            } catch (e) {
+              console.error(e)
+            }
+            return
+          }
+        }
+        try {
+          this.render()
+        } catch (e) {
+          console.error(e)
+          this._focusRaf = 0
+          this._focusRing = null
+          return
+        }
         this._focusRaf = requestAnimationFrame(tick)
       }
       this._focusRaf = requestAnimationFrame(tick)
@@ -736,6 +908,444 @@ export default {
       return 0
     },
 
+    resolvePaintLayer(tileId, erase) {
+      if (erase) {
+        if (this.brush && this.brush.isRegion) return 5
+        if (this.editLayer === 'auto') return 0
+        return Number(this.editLayer) || 0
+      }
+      if (this.brush && this.brush.isRegion) return 5
+      if (this.editLayer !== 'auto' && this.editLayer !== 'Auto') {
+        const z = Number(this.editLayer)
+        if (z >= 0 && z <= 3) return z
+      }
+      // auto：A（含 A5/自动图块）下层 0，B–E 上层 2
+      return isLowerTile(tileId) ? 0 : 2
+    },
+
+    canPaint() {
+      return this.paintEnabled && !this.isEventMode && this.currentMapData && this.brush
+    },
+
+    beginPaintStroke(erase) {
+      this.isPainting = true
+      this.paintErase = !!erase
+      this.paintLastCell = null
+      this.paintBefore = new Map()
+      this.paintDirtyCells = new Set()
+    },
+
+    endPaintStroke() {
+      if (!this.isPainting) return
+      const before = this.paintBefore
+      this.isPainting = false
+      this.paintErase = false
+      this.paintLastCell = null
+      this.paintBefore = null
+      if (!before || !before.size) {
+        this.paintDirtyCells = null
+        return
+      }
+      const after = []
+      const beforeArr = []
+      before.forEach((oldId, key) => {
+        const [x, y, z] = key.split(',').map(Number)
+        beforeArr.push({ x, y, z, tileId: oldId })
+        after.push({ x, y, z, tileId: this.readMapData(x, y, z) })
+      })
+      this.paintDirtyCells = null
+      this.$emit('paint-stroke', { before: beforeArr, after })
+      this.$emit('map-dirty')
+    },
+
+    applyTilesSnapshot(cells) {
+      if (!this.currentMapData || !cells) return
+      const dirty = new Set()
+      cells.forEach((c) => {
+        if (!c) return
+        this.writeMapDataRaw(c.x, c.y, c.z, c.tileId)
+        dirty.add(`${c.x},${c.y}`)
+      })
+      this.invalidateMapCells(dirty)
+      this.$emit('map-dirty')
+    },
+
+    writeMapDataRaw(x, y, z, tileId) {
+      if (!this.currentMapData) return
+      const { width, height, data } = this.currentMapData
+      if (x < 0 || y < 0 || x >= width || y >= height) return
+      data[(z * height + y) * width + x] = tileId || 0
+    },
+
+    invalidateMapCells(cellKeys) {
+      if (!this.currentMapData) return
+      if (!this.mapCache || this.needsRedraw) {
+        this.needsRedraw = true
+        this.renderToCache()
+        this.render()
+        return
+      }
+      const ctx = this.mapCache.getContext('2d')
+      const seen = new Set()
+      cellKeys.forEach((key) => {
+        const [xs, ys] = key.split(',')
+        const x = Number(xs)
+        const y = Number(ys)
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx
+            const ny = y + dy
+            const k = `${nx},${ny}`
+            if (seen.has(k)) continue
+            if (!this.inMapBounds(nx, ny)) continue
+            seen.add(k)
+            ctx.clearRect(nx * this.tileWidth, ny * this.tileHeight, this.tileWidth, this.tileHeight)
+            this.paintTileToContext(ctx, nx, ny)
+          }
+        }
+      })
+      // region 层可能变化
+      const cacheW = this.currentMapData.width * this.tileWidth
+      const cacheH = this.currentMapData.height * this.tileHeight
+      if (this.regionsCache) {
+        this.regionsCache.getContext('2d').clearRect(0, 0, cacheW, cacheH)
+        this.renderRegionsToCache(this.regionsCache.getContext('2d'))
+      }
+      this.render()
+    },
+
+    rememberBefore(x, y, z) {
+      if (!this.paintBefore) return
+      const key = `${x},${y},${z}`
+      if (!this.paintBefore.has(key)) {
+        this.paintBefore.set(key, this.readMapData(x, y, z))
+      }
+    },
+
+    paintAt(mx, my) {
+      if (!this.canPaint() || !this.inMapBounds(mx, my)) return
+      if (this.paintLastCell && this.paintLastCell.x === mx && this.paintLastCell.y === my) return
+      this.paintLastCell = { x: mx, y: my }
+      const brush = this.brush
+      const tiles = (brush && brush.tiles) || [[0]]
+      const rows = tiles.length
+      const cols = (tiles[0] && tiles[0].length) || 0
+      if (!rows || !cols) return
+      const dirty = this.paintDirtyCells || new Set()
+      const refreshList = []
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const tx = mx + c
+          const ty = my + r
+          if (!this.inMapBounds(tx, ty)) continue
+          if (this.paintErase) {
+            const ez =
+              brush && brush.isRegion
+                ? 5
+                : this.editLayer === 'auto'
+                  ? this.guessEraseLayer(tx, ty)
+                  : Number(this.editLayer) || 0
+            this.rememberBefore(tx, ty, ez)
+            this.writeMapDataRaw(tx, ty, ez, 0)
+            dirty.add(`${tx},${ty}`)
+            if (ez <= 3) refreshList.push({ x: tx, y: ty, z: ez })
+            continue
+          }
+          const tileId = tiles[r][c]
+          if (tileId == null) continue
+          const z = this.resolvePaintLayer(tileId, false)
+          this.rememberBefore(tx, ty, z)
+          // 自动图块先写 kindBase，再统一邻接重算
+          this.writeMapDataRaw(tx, ty, z, tileId)
+          dirty.add(`${tx},${ty}`)
+          if (z <= 3) refreshList.push({ x: tx, y: ty, z })
+        }
+      }
+
+      // 邻接重算前先记下 3×3 旧值
+      refreshList.forEach(({ x, y, z }) => {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx
+            const ny = y + dy
+            if (!this.inMapBounds(nx, ny)) continue
+            this.rememberBefore(nx, ny, z)
+            dirty.add(`${nx},${ny}`)
+          }
+        }
+      })
+      const zoneDone = new Set()
+      refreshList.forEach(({ x, y, z }) => {
+        const zk = `${x},${y},${z}`
+        if (zoneDone.has(zk)) return
+        zoneDone.add(zk)
+        refreshAutotileNeighbors(this.currentMapData, x, y, z)
+      })
+
+      this.paintDirtyCells = dirty
+      this.invalidateMapCells(dirty)
+    },
+
+    guessEraseLayer(x, y) {
+      for (const z of [2, 1, 0, 3]) {
+        if (this.readMapData(x, y, z)) return z
+      }
+      return 0
+    },
+
+    activePaintTool() {
+      const t = this.paintTool || 'pencil'
+      if (t === 'rect' || t === 'ellipse' || t === 'fill' || t === 'shadow') return t
+      return 'pencil'
+    },
+
+    brushSize() {
+      const tiles = (this.brush && this.brush.tiles) || [[0]]
+      return {
+        tiles,
+        rows: tiles.length || 1,
+        cols: (tiles[0] && tiles[0].length) || 1,
+      }
+    },
+
+    /** 在 (tx,ty) 铺一格笔刷；锚点用于多格笔刷取模 */
+    applyStamp(tx, ty, anchorX, anchorY, erase, dirty, refreshList, layerOverride) {
+      if (!this.inMapBounds(tx, ty)) return
+      const brush = this.brush
+      if (erase) {
+        const ez =
+          layerOverride != null
+            ? layerOverride
+            : brush && brush.isRegion
+              ? 5
+              : this.editLayer === 'auto'
+                ? this.guessEraseLayer(tx, ty)
+                : Number(this.editLayer) || 0
+        this.rememberBefore(tx, ty, ez)
+        this.writeMapDataRaw(tx, ty, ez, 0)
+        dirty.add(`${tx},${ty}`)
+        if (ez <= 3) refreshList.push({ x: tx, y: ty, z: ez })
+        return
+      }
+      const { tiles, rows, cols } = this.brushSize()
+      const c = ((tx - anchorX) % cols + cols) % cols
+      const r = ((ty - anchorY) % rows + rows) % rows
+      const tileId = tiles[r][c]
+      if (tileId == null) return
+      const z = layerOverride != null ? layerOverride : this.resolvePaintLayer(tileId, false)
+      this.rememberBefore(tx, ty, z)
+      this.writeMapDataRaw(tx, ty, z, tileId)
+      dirty.add(`${tx},${ty}`)
+      if (z <= 3) refreshList.push({ x: tx, y: ty, z })
+    },
+
+    finishAutotile(dirty, refreshList) {
+      refreshList.forEach(({ x, y, z }) => {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx
+            const ny = y + dy
+            if (!this.inMapBounds(nx, ny)) continue
+            this.rememberBefore(nx, ny, z)
+            dirty.add(`${nx},${ny}`)
+          }
+        }
+      })
+      const zoneDone = new Set()
+      refreshList.forEach(({ x, y, z }) => {
+        const zk = `${x},${y},${z}`
+        if (zoneDone.has(zk)) return
+        zoneDone.add(zk)
+        refreshAutotileNeighbors(this.currentMapData, x, y, z)
+      })
+      this.paintDirtyCells = dirty
+      if (dirty.size) this.invalidateMapCells(dirty)
+    },
+
+    /** 矩形填充：框内全部格子 */
+    rectFill(x0, y0, x1, y1) {
+      const minX = Math.min(x0, x1)
+      const maxX = Math.max(x0, x1)
+      const minY = Math.min(y0, y1)
+      const maxY = Math.max(y0, y1)
+      const cells = []
+      for (let y = minY; y <= maxY; y++) {
+        for (let x = minX; x <= maxX; x++) {
+          cells.push({ x, y })
+        }
+      }
+      return cells
+    },
+
+    /** 椭圆填充：格子中心落在椭圆内则包含 */
+    ellipseFill(x0, y0, x1, y1) {
+      const minX = Math.min(x0, x1)
+      const maxX = Math.max(x0, x1)
+      const minY = Math.min(y0, y1)
+      const maxY = Math.max(y0, y1)
+      const rx = Math.max(0.5, (maxX - minX) / 2)
+      const ry = Math.max(0.5, (maxY - minY) / 2)
+      const cx = (minX + maxX) / 2
+      const cy = (minY + maxY) / 2
+      const cells = []
+      for (let y = minY; y <= maxY; y++) {
+        for (let x = minX; x <= maxX; x++) {
+          const nx = (x - cx) / rx
+          const ny = (y - cy) / ry
+          if (nx * nx + ny * ny <= 1.0001) cells.push({ x, y })
+        }
+      }
+      if (!cells.length) cells.push({ x: Math.round(cx), y: Math.round(cy) })
+      return cells
+    },
+
+    cancelShape() {
+      if (!this.isShapeDrag && !this.shapePreview) return
+      this.isShapeDrag = false
+      this.shapePreview = null
+      this.paintErase = false
+      this.isDragging = false
+      this.render()
+    },
+
+    commitShape() {
+      const p = this.shapePreview
+      const erase = this.paintErase
+      this.shapePreview = null
+      this.isShapeDrag = false
+      this.isDragging = false
+      if (!p) {
+        this.render()
+        return
+      }
+      const cells =
+        p.kind === 'ellipse'
+          ? this.ellipseFill(p.x0, p.y0, p.x1, p.y1)
+          : this.rectFill(p.x0, p.y0, p.x1, p.y1)
+      const anchorX = Math.min(p.x0, p.x1)
+      const anchorY = Math.min(p.y0, p.y1)
+      this.beginPaintStroke(erase)
+      const dirty = this.paintDirtyCells
+      const refreshList = []
+      cells.forEach((c) => this.applyStamp(c.x, c.y, anchorX, anchorY, erase, dirty, refreshList))
+      this.finishAutotile(dirty, refreshList)
+      this.endPaintStroke()
+    },
+
+    sameFillTile(a, b, z) {
+      if (z === 5) return (a || 0) === (b || 0)
+      if (isAutotile(a) && isAutotile(b)) return getAutotileKind(a) === getAutotileKind(b)
+      return (a || 0) === (b || 0)
+    },
+
+    fillLayer(erase) {
+      const brush = this.brush
+      if (brush && brush.isRegion) return 5
+      const { tiles } = this.brushSize()
+      const sample = tiles[0][0] || 0
+      if (!erase && this.editLayer !== 'auto') {
+        const z = Number(this.editLayer)
+        if (z >= 0 && z <= 3) return z
+      }
+      if (erase && this.editLayer !== 'auto' && this.editLayer !== 'Auto') {
+        const z = Number(this.editLayer)
+        if (z >= 0 && z <= 3) return z
+      }
+      return this.resolvePaintLayer(sample, false)
+    },
+
+    floodFill(sx, sy, erase) {
+      if (!this.inMapBounds(sx, sy)) return
+      const z = this.fillLayer(erase)
+      const seed = this.readMapData(sx, sy, z)
+      this.beginPaintStroke(erase)
+      const dirty = this.paintDirtyCells
+      const refreshList = []
+      const queue = [[sx, sy]]
+      const seen = new Set([`${sx},${sy}`])
+      while (queue.length) {
+        const [x, y] = queue.shift()
+        if (!this.sameFillTile(this.readMapData(x, y, z), seed, z)) continue
+        this.applyStamp(x, y, sx, sy, erase, dirty, refreshList, z)
+        ;[
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ].forEach(([dx, dy]) => {
+          const nx = x + dx
+          const ny = y + dy
+          if (!this.inMapBounds(nx, ny)) return
+          const key = `${nx},${ny}`
+          if (seen.has(key)) return
+          seen.add(key)
+          queue.push([nx, ny])
+        })
+      }
+      this.finishAutotile(dirty, refreshList)
+      this.endPaintStroke()
+    },
+
+    shadowQuadrant(e) {
+      const { mapX, mapY, canvasX, canvasY } = this.clientToMap(e)
+      const localX = (canvasX - this.offsetX) / this.zoom - mapX * this.tileWidth
+      const localY = (canvasY - this.offsetY) / this.zoom - mapY * this.tileHeight
+      const right = localX >= this.tileWidth / 2 ? 1 : 0
+      const bottom = localY >= this.tileHeight / 2 ? 1 : 0
+      return { mapX, mapY, bit: bottom * 2 + right }
+    },
+
+    paintShadowAt(e, erase) {
+      const { mapX, mapY, bit } = this.shadowQuadrant(e)
+      if (!this.inMapBounds(mapX, mapY)) return
+      const key = `${mapX},${mapY},${bit}`
+      if (this.paintLastCell && this.paintLastCell.key === key) return
+      this.paintLastCell = { key }
+      this.rememberBefore(mapX, mapY, 4)
+      let bits = this.readMapData(mapX, mapY, 4) & 0x0f
+      if (erase) bits &= ~(1 << bit)
+      else bits |= 1 << bit
+      this.writeMapDataRaw(mapX, mapY, 4, bits)
+      const dirty = this.paintDirtyCells || new Set()
+      dirty.add(`${mapX},${mapY}`)
+      this.paintDirtyCells = dirty
+      this.invalidateMapCells(dirty)
+    },
+
+    renderShapePreview() {
+      const p = this.shapePreview
+      if (!p || !this.ctx) return
+      const cells =
+        p.kind === 'ellipse'
+          ? this.ellipseFill(p.x0, p.y0, p.x1, p.y1)
+          : this.rectFill(p.x0, p.y0, p.x1, p.y1)
+      const tw = this.tileWidth * this.zoom
+      const th = this.tileHeight * this.zoom
+      const erase = this.paintErase && !p.eyedrop
+      const fill = p.eyedrop
+        ? 'rgba(80,200,120,0.28)'
+        : erase
+          ? 'rgba(220,60,60,0.35)'
+          : 'rgba(30,144,255,0.35)'
+      const stroke = p.eyedrop
+        ? 'rgba(40,180,100,0.95)'
+        : erase
+          ? 'rgba(220,60,60,0.95)'
+          : 'rgba(30,144,255,0.95)'
+      this.ctx.save()
+      this.ctx.fillStyle = fill
+      this.ctx.strokeStyle = stroke
+      this.ctx.lineWidth = 1
+      cells.forEach(({ x, y }) => {
+        const sx = this.offsetX + x * tw
+        const sy = this.offsetY + y * th
+        this.ctx.fillRect(sx, sy, tw, th)
+        this.ctx.strokeRect(sx + 0.5, sy + 0.5, Math.max(1, tw - 1), Math.max(1, th - 1))
+      })
+      this.ctx.restore()
+    },
+
     renderToCache() {
       if (!this.currentMapData) return
       const width = this.currentMapData.width
@@ -798,7 +1408,25 @@ export default {
         this.drawTile(tiles[z], dx, dy)
         ctx.restore()
       }
+      this.drawShadowBits(ctx, mx, my, dx, dy)
       this.ctx = originalCtx
+    },
+
+    drawShadowBits(ctx, mx, my, dx, dy) {
+      const bits = this.readMapData(mx, my, 4) & 0x0f
+      if (!bits) return
+      const dim = this.editLayer !== 'auto' && this.editLayer !== 3
+      ctx.save()
+      ctx.globalAlpha = dim ? 0.5 * DIM_ALPHA : 0.5
+      ctx.fillStyle = '#000'
+      const w1 = this.tileWidth / 2
+      const h1 = this.tileHeight / 2
+      for (let i = 0; i < 4; i++) {
+        if (bits & (1 << i)) {
+          ctx.fillRect(dx + (i % 2) * w1, dy + Math.floor(i / 2) * h1, w1, h1)
+        }
+      }
+      ctx.restore()
     },
 
     drawTile(tileId, dx, dy) {
@@ -940,17 +1568,69 @@ export default {
       const tileH = this.tileHeight
       const forceFit = !!options.forceFit
       const useOriginal = !forceFit && this.mapCharOriginalSize
-      let dw = cw
-      let dh = ch
-      if (!useOriginal) {
-        const scale = Math.min(tileW / cw, tileH / ch, 1)
-        dw = cw * scale
-        dh = ch * scale
+      if (useOriginal) {
+        const ox = dx + (tileW - cw) / 2
+        const oy = dy + tileH - ch
+        ctx.drawImage(img, sx, sy, cw, ch, ox, oy, cw, ch)
+        return true
       }
-      const ox = dx + (tileW - dw) / 2
-      const oy = dy + tileH - dh
-      ctx.drawImage(img, sx, sy, cw, ch, ox, oy, dw, dh)
+      const box = options.frameBox || { x: dx, y: dy, w: tileW, h: tileH }
+      const fit = (this.editorUi && this.editorUi.eventLargeFit) === 'fit'
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(box.x, box.y, box.w, box.h)
+      ctx.clip()
+      if (fit) {
+        const scale = Math.min(box.w / cw, box.h / ch, 1)
+        const dw = cw * scale
+        const dh = ch * scale
+        const ox = box.x + (box.w - dw) / 2
+        const oy = box.y + box.h - dh
+        ctx.drawImage(img, sx, sy, cw, ch, ox, oy, dw, dh)
+      } else {
+        const sw = Math.min(cw, box.w)
+        const sh = Math.min(ch, box.h)
+        const ssx = sx + (cw - sw) / 2
+        const ssy = sy + (ch - sh) / 2
+        const ox = box.x + (box.w - sw) / 2
+        const oy = box.y + (box.h - sh) / 2
+        ctx.drawImage(img, ssx, ssy, sw, sh, ox, oy, sw, sh)
+      }
+      ctx.restore()
       return true
+    },
+
+    /** 白方框内缘，行走图只画在这里，相当于格子内缩一圈 */
+    eventInnerBox(x, y) {
+      const pad = 6
+      return {
+        x: x + pad,
+        y: y + pad,
+        w: Math.max(1, this.tileWidth - pad * 2),
+        h: Math.max(1, this.tileHeight - pad * 2),
+      }
+    },
+
+    drawEventFill(ctx, x, y) {
+      const pad = 3
+      const ui = this.editorUi || {}
+      ctx.save()
+      ctx.fillStyle = ui.eventFillColor || 'rgba(0,0,0,0.3)'
+      ctx.fillRect(x + pad, y + pad, this.tileWidth - pad * 2, this.tileHeight - pad * 2)
+      ctx.restore()
+    },
+
+    drawEventFrame(ctx, x, y) {
+      const pad = 2
+      const x0 = x + pad + 0.5
+      const y0 = y + pad + 0.5
+      const w = this.tileWidth - pad * 2 - 1
+      const h = this.tileHeight - pad * 2 - 1
+      ctx.save()
+      ctx.lineWidth = 1
+      ctx.strokeStyle = '#ffffff'
+      ctx.strokeRect(x0, y0, w, h)
+      ctx.restore()
     },
 
     renderEventsToCache(ctx) {
@@ -962,19 +1642,26 @@ export default {
         if (!event) return
         const x = event.x * this.tileWidth
         const y = event.y * this.tileHeight
-        ctx.fillStyle = 'rgba(0, 200, 80, 0.22)'
-        ctx.fillRect(x, y, this.tileWidth, this.tileHeight)
+        this.drawEventFill(ctx, x, y)
         const page = event.pages && event.pages[0]
         const image = page && page.image
         let drew = false
-        if (image && image.characterName) {
+        if (image && image.tileId > 0) {
+          const prev = this.ctx
+          this.ctx = ctx
+          this.drawTile(image.tileId, x, y)
+          this.ctx = prev
+          drew = true
+        } else if (image && image.characterName) {
           const img = this.characterImages[image.characterName]
           if (img) {
             const drawImage = {
               ...image,
               pattern: this.animPatternForPage(page),
             }
-            drew = this.drawCharacterFrame(ctx, img, drawImage, x, y)
+            drew = this.drawCharacterFrame(ctx, img, drawImage, x, y, {
+              frameBox: this.eventInnerBox(x, y),
+            })
           }
         }
         if (!drew) {
@@ -987,6 +1674,7 @@ export default {
           ctx.strokeText(text, tx, ty)
           ctx.fillText(text, tx, ty)
         }
+        this.drawEventFrame(ctx, x, y)
         if (this.showHyperlinks && isEventRef(event)) {
           const bx = x + this.tileWidth - 15
           const by = y + 2
@@ -1007,8 +1695,9 @@ export default {
     renderGrid() {
       const width = this.currentMapData.width
       const height = this.currentMapData.height
-      this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)'
-      this.ctx.lineWidth = 1
+      const ui = this.editorUi || {}
+      this.ctx.strokeStyle = ui.gridColor || 'rgba(255, 255, 255, 0.25)'
+      this.ctx.lineWidth = Math.max(1, Number(ui.gridWidth) || 1)
       for (let x = 0; x <= width; x++) {
         this.ctx.beginPath()
         this.ctx.moveTo(x * this.tileWidth, 0)
@@ -1021,6 +1710,20 @@ export default {
         this.ctx.lineTo(width * this.tileWidth, y * this.tileHeight)
         this.ctx.stroke()
       }
+    },
+
+    renderMapEdge() {
+      const ui = this.editorUi || {}
+      if (ui.mapEdgeVisible === false) return
+      const width = this.currentMapData.width
+      const height = this.currentMapData.height
+      const w = width * this.tileWidth
+      const h = height * this.tileHeight
+      this.ctx.save()
+      this.ctx.strokeStyle = ui.mapEdgeColor || 'rgba(255,80,80,0.85)'
+      this.ctx.lineWidth = 2
+      this.ctx.strokeRect(0.5, 0.5, Math.max(1, w - 1), Math.max(1, h - 1))
+      this.ctx.restore()
     },
 
     renderSelectedTile() {
@@ -1117,19 +1820,36 @@ export default {
 
     render() {
       if (!this.canvas || !this.ctx) return
-      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
-      if (!this.currentMapData || !this.mapCache) return
-      this.ctx.save()
-      this.ctx.translate(this.offsetX, this.offsetY)
-      this.ctx.scale(this.zoom, this.zoom)
-      this.ctx.drawImage(this.mapCache, 0, 0)
-      if (this.showRegions && this.regionsCache) this.ctx.drawImage(this.regionsCache, 0, 0)
-      if (this.effectiveShowEvents && this.eventsCache) this.ctx.drawImage(this.eventsCache, 0, 0)
-      if (this.effectiveShowGrid) this.renderGrid()
-      this.renderStartPosition()
-      this.renderSelectedTile()
-      this.ctx.restore()
-      this.renderFocusRing()
+      // 防止 ResizeObserver / 设置回写 与 RAF 重入同一帧渲染
+      if (this._rendering) return
+      this._rendering = true
+      try {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+        this.paintViewportBackground()
+        if (!this.currentMapData || !this.mapCache) return
+        this.ctx.save()
+        this.ctx.translate(this.offsetX, this.offsetY)
+        this.ctx.scale(this.zoom, this.zoom)
+        this.ctx.drawImage(this.mapCache, 0, 0)
+        if (this.showRegions && this.regionsCache) this.ctx.drawImage(this.regionsCache, 0, 0)
+        if (this.effectiveShowEvents && this.eventsCache) {
+          this.ctx.save()
+          if (!this.isEventMode) this.ctx.globalAlpha = 0.4
+          this.ctx.drawImage(this.eventsCache, 0, 0)
+          this.ctx.restore()
+        }
+        if (this.effectiveShowGrid) this.renderGrid()
+        this.renderMapEdge()
+        this.renderStartPosition()
+        this.renderSelectedTile()
+        this.ctx.restore()
+        this.renderShapePreview()
+        this.renderFocusRing()
+      } catch (e) {
+        console.error(e)
+      } finally {
+        this._rendering = false
+      }
     },
 
     renderFocusRing() {
@@ -1169,6 +1889,10 @@ export default {
       if (!container || !this.canvas) return
       const w = container.clientWidth
       const h = container.clientHeight
+      if (this.canvas.width === w && this.canvas.height === h) {
+        // 尺寸未变时勿重设 width（会清空画布并可能与进行中的 render 打架）
+        return
+      }
       this.canvas.width = w
       this.canvas.height = h
       if (this.pendingFit && w > 8 && h > 8) {
@@ -1213,13 +1937,36 @@ export default {
         this.dragStartY = e.clientY - this.offsetY
         this.velocityX = 0
         this.velocityY = 0
-        this.lastMoveTime = Date.now()
+        this._panX = this.offsetX
+        this._panY = this.offsetY
+        this._panMoveTime = Date.now()
+        this.lastMoveTime = this._panMoveTime
+        e.preventDefault()
+        return
+      }
+
+      // 地图模式：右键吸管；Alt+右键擦除；阴影笔右键仍清阴影
+      if (e.button === 2 && this.paintEnabled && !this.isEventMode && this.currentMapData) {
+        const tool = this.activePaintTool()
+        if (tool === 'shadow') {
+          if (this.canPaint()) this.startToolStroke(e, true)
+        } else if (e.altKey) {
+          if (this.canPaint()) this.startToolStroke(e, true)
+        } else {
+          this.beginEyedrop(e)
+        }
         e.preventDefault()
         return
       }
       if (e.button === 2) return
 
       if (e.button === 0) this.clearFocusRing()
+
+      if (e.button === 0 && this.canPaint()) {
+        this.startToolStroke(e, false)
+        e.preventDefault()
+        return
+      }
 
       if (this.isEventMode && e.button === 0) {
         const { mapX, mapY } = this.clientToMap(e)
@@ -1252,8 +1999,162 @@ export default {
       }
     },
 
+    startToolStroke(e, erase) {
+      const tool = this.activePaintTool()
+      const { mapX, mapY } = this.clientToMap(e)
+      this.selectedTile = { x: mapX, y: mapY }
+      this.hasDragged = true
+      if (tool === 'rect' || tool === 'ellipse') {
+        this.paintErase = !!erase
+        this.isShapeDrag = true
+        this.isDragging = true
+        this.shapePreview = { kind: tool, x0: mapX, y0: mapY, x1: mapX, y1: mapY }
+        this.render()
+        return
+      }
+      if (tool === 'fill') {
+        this.floodFill(mapX, mapY, erase)
+        return
+      }
+      if (tool === 'shadow') {
+        this.beginPaintStroke(erase)
+        this.isDragging = true
+        this.paintShadowAt(e, erase)
+        return
+      }
+      this.beginPaintStroke(erase)
+      this.isDragging = true
+      this.paintAt(mapX, mapY)
+    },
+
+    beginEyedrop(e) {
+      const { mapX, mapY } = this.clientToMap(e)
+      if (!this.inMapBounds(mapX, mapY)) return
+      this.isEyedrop = true
+      this.isDragging = true
+      this.hasDragged = true
+      this.selectedTile = { x: mapX, y: mapY }
+      this.shapePreview = {
+        kind: 'rect',
+        eyedrop: true,
+        x0: mapX,
+        y0: mapY,
+        x1: mapX,
+        y1: mapY,
+      }
+      this.render()
+    },
+
+    cancelEyedrop() {
+      this.isEyedrop = false
+      this.isDragging = false
+      this.shapePreview = null
+      this.render()
+    },
+
+    commitEyedrop() {
+      const p = this.shapePreview
+      this.isEyedrop = false
+      this.isDragging = false
+      this.shapePreview = null
+      if (!p || !this.currentMapData) {
+        this.render()
+        return
+      }
+      const brush = this.sampleBrushFromRect(p.x0, p.y0, p.x1, p.y1)
+      this.render()
+      if (brush) this.$emit('brush-pick', brush)
+    },
+
+    sampleTileAt(x, y) {
+      if (this.paletteTab === 'R' || (this.brush && this.brush.isRegion)) {
+        return { id: this.readMapData(x, y, 5) || 0, isRegion: true }
+      }
+      if (this.editLayer !== 'auto' && this.editLayer !== 'Auto') {
+        const z = Number(this.editLayer)
+        if (z >= 0 && z <= 3) return { id: this.readMapData(x, y, z) || 0, isRegion: false }
+        if (z === 5) return { id: this.readMapData(x, y, 5) || 0, isRegion: true }
+      }
+      const lower = this.readMapData(x, y, 0) || 0
+      if (lower && isLowerTile(lower)) return { id: lower, isRegion: false }
+      for (const z of [2, 1, 3]) {
+        const id = this.readMapData(x, y, z) || 0
+        if (id) return { id, isRegion: false }
+      }
+      return { id: lower, isRegion: false }
+    },
+
+    normalizePickId(id, isRegion) {
+      if (isRegion) return Math.max(0, Math.min(255, id | 0))
+      if (!id) return 0
+      if (isAutotile(id)) return 2048 + getAutotileKind(id) * 48
+      return id
+    },
+
+    pageOfPickId(id, isRegion) {
+      if (isRegion) return 'R'
+      if (!id) return this.paletteTab || 'A'
+      if (isAutotile(id) || isTileA5(id)) return 'A'
+      return tileSetOfId(id) || 'B'
+    },
+
+    sampleBrushFromRect(x0, y0, x1, y1) {
+      const minX = Math.min(x0, x1)
+      const maxX = Math.max(x0, x1)
+      const minY = Math.min(y0, y1)
+      const maxY = Math.max(y0, y1)
+      const tiles = []
+      let isAutotileKind = false
+      let isRegion = false
+      let page = this.paletteTab || 'A'
+      let pageSet = false
+      for (let y = minY; y <= maxY; y++) {
+        const row = []
+        for (let x = minX; x <= maxX; x++) {
+          if (!this.inMapBounds(x, y)) {
+            row.push(0)
+            continue
+          }
+          const raw = this.sampleTileAt(x, y)
+          const id = this.normalizePickId(raw.id, raw.isRegion)
+          if (raw.isRegion) isRegion = true
+          if (isAutotile(id)) isAutotileKind = true
+          if (!pageSet && (id || raw.isRegion)) {
+            page = this.pageOfPickId(id, raw.isRegion)
+            pageSet = true
+          }
+          row.push(id)
+        }
+        tiles.push(row)
+      }
+      if (isRegion) page = 'R'
+      return {
+        page,
+        tiles,
+        isAutotileKind,
+        isRegion,
+        cols: maxX - minX + 1,
+        rows: maxY - minY + 1,
+      }
+    },
+
     onMouseMove(e) {
+      if ((this.isShapeDrag || this.isEyedrop) && this.shapePreview) {
+        const { mapX, mapY } = this.clientToMap(e)
+        this.shapePreview = { ...this.shapePreview, x1: mapX, y1: mapY }
+        this.render()
+        return
+      }
       if (!this.isDragging) return
+
+      if (this.isPainting) {
+        if (this.activePaintTool() === 'shadow') this.paintShadowAt(e, this.paintErase)
+        else {
+          const { mapX, mapY } = this.clientToMap(e)
+          this.paintAt(mapX, mapY)
+        }
+        return
+      }
 
       if (this.draggingEventId) {
         const { mapX, mapY } = this.clientToMap(e)
@@ -1279,21 +2180,70 @@ export default {
         this.hasDragged = true
       }
       const now = Date.now()
-      const dt = now - this.lastMoveTime
+      const dt = now - (this._panMoveTime || now)
       if (dt > 0) {
-        this.velocityX = ((newOffsetX - this.offsetX) / dt) * 16
-        this.velocityY = ((newOffsetY - this.offsetY) / dt) * 16
+        this.velocityX = ((newOffsetX - this._panX) / dt) * 16
+        this.velocityY = ((newOffsetY - this._panY) / dt) * 16
       }
-      this.lastMoveTime = now
-      this.offsetX = newOffsetX
-      this.offsetY = newOffsetY
+      this._panX = newOffsetX
+      this._panY = newOffsetY
+      this._panMoveTime = now
+      this.schedulePanFrame()
+    },
+
+    schedulePanFrame() {
+      if (this._panFrame) return
+      this._panFrame = requestAnimationFrame(() => {
+        this._panFrame = 0
+        this.applyPanPosition()
+      })
+    },
+
+    applyPanPosition() {
+      if (this._panX == null || this._panY == null) return
+      this.offsetX = this._panX
+      this.offsetY = this._panY
       this.clampOffset()
       this.render()
     },
 
+    flushPanFrame() {
+      if (this._panFrame) {
+        cancelAnimationFrame(this._panFrame)
+        this._panFrame = 0
+      }
+      this.applyPanPosition()
+    },
+
+    onMouseLeave(e) {
+      if (this.isEyedrop) {
+        this.cancelEyedrop()
+        return
+      }
+      if (this.isShapeDrag) {
+        this.cancelShape()
+        return
+      }
+      this.onMouseUp(e)
+    },
+
     onMouseUp(e) {
+      if (this.isEyedrop) {
+        this.commitEyedrop()
+        return
+      }
+      if (this.isShapeDrag) {
+        this.commitShape()
+        return
+      }
+      if (this.isPainting) {
+        this.isDragging = false
+        this.endPaintStroke()
+        return
+      }
       if (!this.isDragging) return
       const wasPanning = this.isPanning
+      if (wasPanning) this.flushPanFrame()
       this.isDragging = false
       this.isPanning = false
 
@@ -1340,8 +2290,9 @@ export default {
 
     onContextMenu(e) {
       e.preventDefault()
-      // Ctrl+右键用于平移，不弹出菜单
-      if (e.ctrlKey || this.hasDragged) return
+      // Ctrl+右键用于平移；地图模式右键吸管不弹菜单
+      if (e.ctrlKey || this.hasDragged || this.isPainting) return
+      if (this.canPaint()) return
       if (!this.currentMapData) return
       const { mapX, mapY } = this.clientToMap(e)
       if (!this.inMapBounds(mapX, mapY)) return
@@ -1405,9 +2356,33 @@ export default {
 
     onWheel(e) {
       this.clearFocusRing()
-      const delta = e.deltaY > 0 ? 0.9 : 1.1
-      const rect = this.canvas.getBoundingClientRect()
-      this.setZoom(this.zoom * delta, e.clientX - rect.left, e.clientY - rect.top)
+      // Ctrl+滚轮：缩放；否则平移
+      if (e.ctrlKey || e.metaKey) {
+        const delta = e.deltaY > 0 ? 0.9 : 1.1
+        const rect = this.canvas.getBoundingClientRect()
+        this.setZoom(this.zoom * delta, e.clientX - rect.left, e.clientY - rect.top)
+        return
+      }
+      this.velocityX = 0
+      this.velocityY = 0
+      // deltaMode: 0=pixel, 1=line, 2=page
+      let dx = e.deltaX
+      let dy = e.deltaY
+      if (e.deltaMode === 1) {
+        dx *= 16
+        dy *= 16
+      } else if (e.deltaMode === 2) {
+        dx *= 100
+        dy *= 100
+      }
+      if (e.shiftKey && !e.deltaX) {
+        dx = dy
+        dy = 0
+      }
+      this.offsetX -= dx
+      this.offsetY -= dy
+      this.clampOffset()
+      this.render()
     },
 
     zoomIn() {
@@ -1576,7 +2551,7 @@ export default {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: #1a1a1a;
+  background: transparent;
 }
 .map-stage {
   flex: 1;
@@ -1592,34 +2567,53 @@ export default {
   overflow: hidden;
 }
 .map-scroll {
-  background: var(--app-surface-2, #2a2a2a);
-  flex-shrink: 0;
+  position: absolute;
+  z-index: 5;
+  background: var(--map-scroll-track, rgba(40, 40, 40, 0.55));
+  scrollbar-color: var(--map-scroll-thumb, rgba(200, 200, 200, 0.95)) var(--map-scroll-track, rgba(40, 40, 40, 0.55));
+}
+.map-scroll::-webkit-scrollbar {
+  width: var(--map-scroll-size, 14px);
+  height: var(--map-scroll-size, 14px);
+}
+.map-scroll::-webkit-scrollbar-track {
+  background: var(--map-scroll-track, rgba(40, 40, 40, 0.55));
+}
+.map-scroll::-webkit-scrollbar-thumb {
+  background: var(--map-scroll-thumb, rgba(200, 200, 200, 0.95));
+  border-radius: 4px;
 }
 .map-scroll-v {
-  width: 14px;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--map-scroll-size, 14px);
   overflow-x: hidden;
   overflow-y: scroll;
 }
-.map-scroll-row {
-  display: flex;
-  flex-shrink: 0;
-  height: 14px;
+.map-scroll-v.has-h {
+  bottom: var(--map-scroll-size, 14px);
 }
 .map-scroll-h {
-  flex: 1;
-  min-width: 0;
-  height: 14px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--map-scroll-size, 14px);
   overflow-x: scroll;
   overflow-y: hidden;
 }
+.map-scroll-h.has-v {
+  right: var(--map-scroll-size, 14px);
+}
 .map-scroll-corner {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  background: var(--app-surface-2, #2a2a2a);
-  border-left: 1px solid var(--app-border, #444);
-  border-top: 1px solid var(--app-border, #444);
-  box-sizing: border-box;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: var(--map-scroll-size, 14px);
+  height: var(--map-scroll-size, 14px);
+  z-index: 5;
+  background: var(--map-scroll-track, rgba(40, 40, 40, 0.55));
+  pointer-events: none;
 }
 .map-scroll-spacer {
   min-width: 1px;

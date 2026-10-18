@@ -5,6 +5,7 @@
     :model-value="modelValue"
     :command="command"
     :entry="entry"
+    :command-list="commandList"
     @update:model-value="$emit('update:modelValue', $event)"
     @confirm="onConfirm" />
 </template>
@@ -112,6 +113,7 @@ export default {
     modelValue: { type: Boolean, default: false },
     entry: { type: Object, default: null },
     command: { type: Object, default: null },
+    commandList: { type: Array, default: () => [] },
   },
   emits: ['update:modelValue', 'confirm'],
   computed: {

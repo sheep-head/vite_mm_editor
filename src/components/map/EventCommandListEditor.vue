@@ -4,31 +4,49 @@
     <div
       ref="listEl"
       class="ev-cmd-list"
+      :class="{ 'is-selectable': commandTextSelectable }"
       tabindex="0"
       @dblclick="onListDblClick"
       @keydown="onCmdListKeydown"
       @contextmenu="onContextMenu"
       @scroll="closeMenu">
       <div
-        v-for="(cmd, i) in list"
-        :key="i"
+        v-for="row in displayRows"
+        :key="row.i"
         class="ev-cmd-line"
-        :class="{ end: cmd.code === 0, selected: isSelected(i), focus: focusIndex === i }"
-        :data-index="i"
-        @click="onLineClick(i, $event)">
-        {{ formatCommandLine(cmd) }}
+        :class="lineClasses(row)"
+        :data-index="row.i"
+        @click="onLineClick(row.i, $event)">
+        <template v-if="!row.empty">
+          <span class="ev-indent">{{ indentText(row.cmd) }}</span>
+          <span class="ev-mark">{{ partsOf(row.i).mark }}</span>
+          <span v-if="partsOf(row.i).pad" class="ev-script-pad">{{ partsOf(row.i).pad }}</span>
+          <span v-if="partsOf(row.i).label" class="ev-label">{{ partsOf(row.i).label }}</span>
+          <span class="ev-body">{{ partsOf(row.i).body }}</span>
+          <span v-if="partsOf(row.i).note" class="ev-note">{{ partsOf(row.i).note }}</span>
+        </template>
+        <span v-else class="ev-empty">&nbsp;</span>
       </div>
     </div>
-    <el-collapse v-if="!readonly && showJson" class="ev-json">
-      <el-collapse-item title="高级：list JSON" name="json">
-        <el-input v-model="listJson" type="textarea" :rows="8" @blur="applyListJson" />
-        <p v-if="listJsonError" class="ev-json-err">{{ listJsonError }}</p>
-      </el-collapse-item>
-    </el-collapse>
+    <div v-if="!readonly && showJson && showCommandJson" class="ev-json-bar">
+      <el-button size="small" @click="openJson">JSON…</el-button>
+    </div>
+    <el-dialog v-model="jsonVisible" title="执行内容 JSON" width="720px" append-to-body :close-on-click-modal="false">
+      <div class="ev-json-tree">
+        <json-tree-view :data="list" />
+      </div>
+      <el-input v-model="listJson" type="textarea" :rows="12" />
+      <p v-if="listJsonError" class="ev-json-err">{{ listJsonError }}</p>
+      <template #footer>
+        <el-button @click="jsonVisible = false">取消</el-button>
+        <el-button type="primary" @click="applyListJsonAndClose">确定</el-button>
+      </template>
+    </el-dialog>
 
     <teleport to="body">
       <ul
         v-show="menu.visible"
+        ref="cmdMenu"
         class="contextmenu ev-cmd-ctx"
         :style="menuStyle"
         @contextmenu.prevent>
@@ -48,25 +66,34 @@
       v-model="paramVisible"
       :entry="paramEntry"
       :command="paramCommand"
+      :command-list="list"
       @confirm="onParamConfirm" />
   </div>
 </template>
 
 <script>
 import { ElMessage } from 'element-plus'
-import { formatCommandLine } from './eventDefaults'
+import {
+  formatCommandParts,
+  getCommandSpan,
+  getNavUnit,
+  listNavStarts,
+  countReplaceSpan,
+  CONT_MAP,
+} from './eventDefaults'
+import { mapGetters } from 'vuex'
 import EventCommandSelectDialog from './EventCommandSelectDialog.vue'
 import ParamDialogHost from './ParamDialogHost.vue'
 import { findCatalogEntry } from './eventCommandCatalog'
+import JsonTreeView from './JsonTreeView.vue'
 
 /** 模块级剪贴板：地图事件与公共事件之间可互贴 */
 let commandClipboard = null
-
-const CONT_MAP = { 101: 401, 105: 405, 108: 408, 355: 655, 302: 605 }
+const MIN_VISIBLE_ROWS = 24
 
 export default {
   name: 'EventCommandListEditor',
-  components: { EventCommandSelectDialog, ParamDialogHost },
+  components: { EventCommandSelectDialog, ParamDialogHost, JsonTreeView },
   props: {
     modelValue: { type: Array, default: () => [] },
     readonly: { type: Boolean, default: false },
@@ -92,11 +119,30 @@ export default {
       _paramConfirmed: false,
       clipboardTick: 0,
       menu: { visible: false, x: 0, y: 0 },
+      jsonVisible: false,
+      _partsCache: null,
     }
   },
   computed: {
+    ...mapGetters(['editorUi']),
+    commandTextSelectable() {
+      return !!(this.editorUi && this.editorUi.commandTextSelectable)
+    },
+    showCommandJson() {
+      return !this.editorUi || this.editorUi.showCommandJson !== false
+    },
     list() {
       return Array.isArray(this.modelValue) ? this.modelValue : []
+    },
+    displayRows() {
+      const list = this.list
+      const n = Math.max(list.length, MIN_VISIBLE_ROWS)
+      const rows = []
+      for (let i = 0; i < n; i++) {
+        if (i < list.length) rows.push({ i, cmd: list[i], empty: false })
+        else rows.push({ i, cmd: null, empty: true })
+      }
+      return rows
     },
     menuStyle() {
       return {
@@ -129,15 +175,13 @@ export default {
       this.clipboardTick
       return !this.readonly && !!(commandClipboard && commandClipboard.length)
     },
-    isSingleSelect() {
-      return this.selectedIndices.length === 1
-    },
   },
   watch: {
     modelValue: {
       deep: true,
       immediate: true,
       handler() {
+        this._partsCache = null
         this.syncListJson()
         this.clampSelection()
       },
@@ -147,9 +191,7 @@ export default {
     },
     paramVisible(v, was) {
       if (was && !v) {
-        if (this.paramFromInsert && !this._paramConfirmed) {
-          this.cmdSelectVisible = true
-        }
+        // 参数窗叠在指令选择窗之上：取消时保持选择窗打开；确认时在 onParamConfirm 里一并关闭
         this.paramFromInsert = false
         this._paramConfirmed = false
       }
@@ -164,8 +206,47 @@ export default {
     window.removeEventListener('blur', this.closeMenu)
   },
   methods: {
-    formatCommandLine,
+    ensurePartsCache() {
+      if (this._partsCache && this._partsCache.length === this.list.length) return this._partsCache
+      const cache = []
+      let prevColor = 'info'
+      for (let i = 0; i < this.list.length; i++) {
+        const parts = formatCommandParts(this.list[i], prevColor)
+        cache.push(parts)
+        if (parts.code !== 0) prevColor = parts.color || prevColor
+      }
+      this._partsCache = cache
+      return cache
+    },
+    partsOf(i) {
+      const cache = this.ensurePartsCache()
+      return cache[i] || formatCommandParts(this.list[i])
+    },
+    indentText(cmd) {
+      return '　'.repeat((cmd && cmd.indent) || 0)
+    },
+    lineClasses(row) {
+      const i = row.i
+      if (row.empty) {
+        return {
+          empty: true,
+          zebra: i % 2 === 1,
+          selected: false,
+          focus: false,
+        }
+      }
+      const parts = this.partsOf(i)
+      return {
+        ['kind-' + parts.kind]: true,
+        ['color-' + (parts.color || 'info')]: true,
+        zebra: i % 2 === 1,
+        end: row.cmd && row.cmd.code === 0,
+        selected: this.isSelected(i),
+        focus: this.focusIndex === i,
+      }
+    },
     emitList() {
+      this._partsCache = null
       this.$emit('update:modelValue', this.list)
       this.syncListJson()
     },
@@ -173,15 +254,24 @@ export default {
       this.listJson = JSON.stringify(this.list || [], null, 2)
       this.listJsonError = ''
     },
+    openJson() {
+      this.syncListJson()
+      this.jsonVisible = true
+    },
     applyListJson() {
       try {
         const parsed = JSON.parse(this.listJson)
         if (!Array.isArray(parsed)) throw new Error('必须是数组')
         this.$emit('update:modelValue', parsed)
         this.listJsonError = ''
+        return true
       } catch (e) {
         this.listJsonError = 'JSON 无效: ' + e.message
+        return false
       }
+    },
+    applyListJsonAndClose() {
+      if (this.applyListJson()) this.jsonVisible = false
     },
     isSelected(i) {
       return this.selectedIndices.includes(i)
@@ -189,30 +279,52 @@ export default {
     sortedUnique(arr) {
       return [...new Set(arr)].filter((i) => i >= 0 && i < this.list.length).sort((a, b) => a - b)
     },
-    setSingleSelection(i) {
-      const idx = Math.max(0, Math.min(i, Math.max(0, this.list.length - 1)))
-      this.selectedIndices = this.list.length ? [idx] : []
-      this.focusIndex = idx
-      this.anchorIndex = idx
+    indicesFromSpan(span) {
+      const out = []
+      for (let i = span.start; i <= span.end; i++) out.push(i)
+      return out
+    },
+    setSelectionToSpan(span, focusAt) {
+      this.selectedIndices = this.indicesFromSpan(span)
+      this.focusIndex = focusAt != null ? focusAt : span.start
+      this.anchorIndex = span.start
       this.focusList()
     },
+    setSingleSelection(i) {
+      if (!this.list.length) {
+        this.selectedIndices = []
+        this.focusIndex = 0
+        this.anchorIndex = 0
+        return
+      }
+      const span = getCommandSpan(this.list, i)
+      this.setSelectionToSpan(span, i)
+    },
     selectRange(from, to) {
-      const a = Math.min(from, to)
-      const b = Math.max(from, to)
+      const aSpan = getCommandSpan(this.list, from)
+      const bSpan = getCommandSpan(this.list, to)
+      const a = Math.min(aSpan.start, bSpan.start)
+      const b = Math.max(aSpan.end, bSpan.end)
       const indices = []
       for (let i = a; i <= b; i++) indices.push(i)
       this.selectedIndices = this.sortedUnique(indices)
-      this.focusIndex = Math.max(0, Math.min(to, Math.max(0, this.list.length - 1)))
+      this.focusIndex = to
       this.focusList()
     },
     toggleSelection(i) {
+      const span = getCommandSpan(this.list, i)
       const set = new Set(this.selectedIndices)
-      if (set.has(i)) set.delete(i)
-      else set.add(i)
+      const allIn = this.indicesFromSpan(span).every((x) => set.has(x))
+      if (allIn) {
+        this.indicesFromSpan(span).forEach((x) => set.delete(x))
+      } else {
+        this.indicesFromSpan(span).forEach((x) => set.add(x))
+      }
       this.selectedIndices = this.sortedUnique([...set])
       this.focusIndex = i
       if (!this.selectedIndices.length && this.list.length) {
-        this.selectedIndices = [i]
+        this.setSelectionToSpan(span, i)
+        return
       }
       this.focusList()
     },
@@ -232,12 +344,20 @@ export default {
       }
       this.selectedIndices = this.sortedUnique(this.selectedIndices)
       if (!this.selectedIndices.length) {
-        this.selectedIndices = [0]
+        this.setSingleSelection(0)
+        return
       }
       this.focusIndex = Math.max(0, Math.min(this.focusIndex, max))
       this.anchorIndex = Math.max(0, Math.min(this.anchorIndex, max))
     },
     onLineClick(i, e) {
+      this.focusList()
+      if (i >= this.list.length) {
+        // 空白行：选中末尾结束指令
+        const end = this.list.length - 1
+        if (end >= 0) this.setSingleSelection(end)
+        return
+      }
       if (e.shiftKey) {
         this.selectRange(this.anchorIndex, i)
       } else if (e.ctrlKey || e.metaKey) {
@@ -280,14 +400,22 @@ export default {
         }
       }
       if (this.readonly) return
-      const pad = 8
-      const mw = 140
-      const mh = 220
-      let x = e.clientX
-      let y = e.clientY
-      if (x + mw > window.innerWidth - pad) x = window.innerWidth - mw - pad
-      if (y + mh > window.innerHeight - pad) y = window.innerHeight - mh - pad
-      this.menu = { visible: true, x, y }
+      this.menu = { visible: true, x: e.clientX, y: e.clientY }
+      this.$nextTick(() => {
+        const el = this.$refs.cmdMenu
+        if (!el) return
+        const h = el.offsetHeight || 0
+        const w = el.offsetWidth || 0
+        const pad = 4
+        let x = e.clientX
+        let y = e.clientY
+        if (y + h > window.innerHeight - pad) y = e.clientY - h
+        if (y < pad) y = pad
+        if (x + w > window.innerWidth - pad) x = window.innerWidth - w - pad
+        if (x < pad) x = pad
+        this.menu.x = x
+        this.menu.y = y
+      })
     },
     menuAction(fn) {
       if (typeof fn === 'function') fn()
@@ -306,37 +434,51 @@ export default {
       if (t.isContentEditable) return true
       return false
     },
-    moveFocus(next, extend) {
-      const max = Math.max(0, this.list.length - 1)
-      const i = Math.max(0, Math.min(next, max))
+    moveFocusByNav(dir, extend) {
+      const starts = listNavStarts(this.list)
+      if (!starts.length) return
+      const unit = getNavUnit(this.list, this.focusIndex)
+      let idx = starts.indexOf(unit.start)
+      if (idx < 0) {
+        idx = starts.findIndex((s) => s >= unit.start)
+        if (idx < 0) idx = starts.length - 1
+      }
+      const nextIdx = Math.max(0, Math.min(starts.length - 1, idx + dir))
+      const nextStart = starts[nextIdx]
       if (extend) {
-        this.selectRange(this.anchorIndex, i)
+        this.selectRange(this.anchorIndex, nextStart)
       } else {
-        this.setSingleSelection(i)
+        this.setSingleSelection(nextStart)
       }
     },
     onCmdListKeydown(e) {
       if (this.isTypingTarget(e)) return
-      const max = this.list.length - 1
       const extend = e.shiftKey
       if (e.key === 'ArrowUp') {
         e.preventDefault()
-        this.moveFocus(this.focusIndex - 1, extend)
+        this.moveFocusByNav(-1, extend)
         return
       }
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        this.moveFocus(this.focusIndex + 1, extend)
+        this.moveFocusByNav(1, extend)
         return
       }
       if (e.key === 'Home') {
         e.preventDefault()
-        this.moveFocus(0, extend)
+        const starts = listNavStarts(this.list)
+        if (!starts.length) return
+        if (extend) this.selectRange(this.anchorIndex, starts[0])
+        else this.setSingleSelection(starts[0])
         return
       }
       if (e.key === 'End') {
         e.preventDefault()
-        this.moveFocus(max, extend)
+        const starts = listNavStarts(this.list)
+        if (!starts.length) return
+        const last = starts[starts.length - 1]
+        if (extend) this.selectRange(this.anchorIndex, last)
+        else this.setSingleSelection(last)
         return
       }
       const ctrl = e.ctrlKey || e.metaKey
@@ -346,7 +488,7 @@ export default {
         return
       }
       if (this.readonly) return
-      if (e.key === 'Enter') {
+      if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault()
         this.onListDblClick()
         return
@@ -380,7 +522,15 @@ export default {
       if (this.readonly) return
       this.closeMenu()
       const list = this.list
-      const i = this.focusIndex
+      const span = getCommandSpan(list, this.focusIndex)
+      let i = span.start
+      const head = list[i]
+      // 分歧整块时编辑 111
+      if (head && (head.code === 111 || head.code === 112)) {
+        i = span.start
+      } else {
+        i = getNavUnit(list, this.focusIndex).start
+      }
       const cmd = list[i]
       if (cmd && cmd.code !== 0) {
         let entry = findCatalogEntry(cmd.code)
@@ -394,7 +544,8 @@ export default {
           this.paramCommand = this.buildParamCommand(list, i)
           this.paramReplace = true
           this.paramInsertIndex = i
-          this.paramReplaceCount = this.countReplaceSpan(list, i)
+          // 编辑只替换头+续行，不整块清掉分歧内容
+          this.paramReplaceCount = countReplaceSpan(list, i)
           this.paramVisible = true
         } else {
           this.cmdSelectVisible = true
@@ -407,12 +558,19 @@ export default {
       const cmd = list[i]
       if (!cmd) return null
       if (cmd.code === 101 || cmd.code === 105 || cmd.code === 355) {
-        const cont = cmd.code === 101 ? 401 : cmd.code === 105 ? 405 : 655
+        const cont = CONT_MAP[cmd.code]
         const extra = []
         for (let j = i + 1; j < list.length && list[j].code === cont; j++) {
           extra.push((list[j].parameters && list[j].parameters[0]) || '')
         }
         return { ...cmd, parameters: [...(cmd.parameters || [])], _extraLines: extra }
+      }
+      if (cmd.code === 111) {
+        return {
+          ...cmd,
+          parameters: [...(cmd.parameters || [])],
+          _hasElse: this.branchHasElse(list, i),
+        }
       }
       if (cmd.code === 302) {
         const extraGoods = []
@@ -430,24 +588,19 @@ export default {
       return cmd
     },
     countReplaceSpan(list, i) {
-      const cmd = list[i]
-      if (!cmd) return 1
-      const cont = CONT_MAP[cmd.code]
-      if (cont != null) {
-        let n = 1
-        for (let j = i + 1; j < list.length && list[j].code === cont; j++) n++
-        return n
-      }
-      return 1
+      return countReplaceSpan(list, i)
     },
-    /** 将选中下标扩成续行区间并合并 */
+    /** 选区按 getCommandSpan 扩并合并 */
     getMergedRanges() {
       const list = this.list
       const raw = []
+      const seen = new Set()
       for (const i of this.sortedUnique(this.selectedIndices)) {
-        if (i < 0 || i >= list.length) continue
-        const n = this.countReplaceSpan(list, i)
-        raw.push([i, i + n - 1])
+        const span = getCommandSpan(list, i)
+        const key = span.start + ':' + span.end
+        if (seen.has(key)) continue
+        seen.add(key)
+        raw.push([span.start, span.end])
       }
       if (!raw.length) return []
       raw.sort((a, b) => a[0] - b[0])
@@ -484,7 +637,7 @@ export default {
         this.paramReplace = false
         this.paramInsertIndex = insertAt
         this.paramReplaceCount = 1
-        this.cmdSelectVisible = false
+        // 指令选择窗保持打开，参数窗叠在上面
         this.paramVisible = true
         return
       }
@@ -495,15 +648,78 @@ export default {
       this.insertCommands(cmds, insertAt, false)
       this.cmdSelectVisible = false
     },
+    branchHasElse(list, headIndex) {
+      const head = list[headIndex]
+      if (!head) return false
+      const indent = head.indent || 0
+      const end = this.findBranchEnd(list, headIndex)
+      if (end < 0) return false
+      for (let i = headIndex + 1; i < end; i++) {
+        if ((list[i].indent || 0) === indent && list[i].code === 411) return true
+      }
+      return false
+    },
+    findBranchEnd(list, headIndex) {
+      const head = list[headIndex]
+      if (!head) return -1
+      const indent = head.indent || 0
+      let depth = 0
+      for (let i = headIndex + 1; i < list.length; i++) {
+        const c = list[i]
+        if ((c.indent || 0) < indent) return -1
+        if ((c.indent || 0) !== indent) continue
+        if (c.code === 111) depth++
+        else if (c.code === 412) {
+          if (depth === 0) return i
+          depth--
+        }
+      }
+      return -1
+    },
+    syncElseBranch(headIndex, want) {
+      const list = this.list
+      const head = list[headIndex]
+      if (!head || head.code !== 111) return
+      const indent = head.indent || 0
+      const end = this.findBranchEnd(list, headIndex)
+      if (end < 0) return
+      let elseAt = -1
+      for (let i = headIndex + 1; i < end; i++) {
+        if ((list[i].indent || 0) === indent && list[i].code === 411) {
+          elseAt = i
+          break
+        }
+      }
+      if (want && elseAt < 0) {
+        list.splice(end, 0,
+          { code: 411, indent, parameters: [] },
+          { code: 0, indent: indent + 1, parameters: [] })
+        this.emitList()
+      } else if (!want && elseAt >= 0) {
+        list.splice(elseAt, end - elseAt)
+        this.emitList()
+      }
+    },
     onParamConfirm(commands) {
       this._paramConfirmed = true
-      this.insertCommands(commands, this.paramInsertIndex, this.paramReplace, this.paramReplaceCount)
+      let cmds = commands || []
+      let elseBranch
+      if (this.paramReplace && cmds[0] && cmds[0].code === 111 && cmds[0].elseBranch != null) {
+        elseBranch = !!cmds[0].elseBranch
+        const c = cmds[0]
+        cmds = [{ code: 111, indent: c.indent, parameters: c.parameters }]
+      }
+      const headAt = this.paramInsertIndex
+      this.insertCommands(cmds, headAt, this.paramReplace, this.paramReplaceCount)
+      if (elseBranch != null) this.syncElseBranch(headAt, elseBranch)
+      this.paramVisible = false
       this.cmdSelectVisible = false
       this.paramFromInsert = false
     },
     insertIndex() {
       const list = this.list
-      let i = this.focusIndex
+      const span = getCommandSpan(list, this.focusIndex)
+      let i = span.start
       if (i < 0 || i >= list.length) i = Math.max(0, list.length - 1)
       return i
     },
@@ -519,14 +735,7 @@ export default {
         list.splice(idx, 0, ...commands)
       }
       this.ensureEndCommand()
-      const end = idx + commands.length - 1
-      this.selectedIndices = []
-      for (let i = idx; i <= end && i < list.length; i++) {
-        if (list[i].code !== 0) this.selectedIndices.push(i)
-      }
-      if (!this.selectedIndices.length) this.selectedIndices = [idx]
-      this.focusIndex = this.selectedIndices[0]
-      this.anchorIndex = this.focusIndex
+      this.setSingleSelection(idx)
       this.emitList()
     },
     ensureListArray() {
@@ -602,10 +811,14 @@ export default {
       this.insertCommands(cmds, this.insertIndex(), false)
     },
     canMoveCmd(dir) {
-      if (this.readonly || !this.isSingleSelect) return false
+      if (this.readonly) return false
       const list = this.list
-      const i = this.focusIndex
-      if (i < 0 || i >= list.length) return false
+      const unit = getNavUnit(list, this.focusIndex)
+      // 仅单行可上下移（续行块/分歧整块禁用）
+      if (unit.start !== unit.end) return false
+      const sel = this.sortedUnique(this.selectedIndices)
+      if (sel.length !== 1 || sel[0] !== unit.start) return false
+      const i = unit.start
       if (list[i].code === 0) return false
       const j = i + dir
       if (j < 0 || j >= list.length) return false
@@ -615,7 +828,7 @@ export default {
     moveSelectedCmd(dir) {
       if (!this.canMoveCmd(dir)) return
       const list = this.list
-      const i = this.focusIndex
+      const i = getNavUnit(list, this.focusIndex).start
       const j = i + dir
       const tmp = list[i]
       list[i] = list[j]
@@ -648,33 +861,139 @@ export default {
   overflow: auto;
   border: 1px solid var(--app-border);
   border-radius: 4px;
-  background: var(--app-surface-2);
+  background: #fff;
   outline: none;
+  user-select: none;
+}
+.ev-cmd-list.is-selectable {
+  user-select: text;
+}
+.ev-json-bar {
+  margin-top: 6px;
 }
 .ev-cmd-list:focus {
-  border-color: var(--el-color-primary, #409eff);
+  border-color: #2a5db0;
 }
 .ev-cmd-line {
-  font-family: Consolas, 'Courier New', monospace;
-  font-size: 12px;
-  padding: 2px 8px;
+  font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif;
+  font-size: 13px;
+  padding: 1px 8px;
   white-space: pre;
   cursor: default;
-  color: #2d8a3e;
+  color: #222;
+  line-height: 1.45;
 }
-.ev-cmd-line.end {
-  opacity: 0.55;
-  color: var(--app-text-muted);
+.ev-cmd-line.zebra {
+  background: #f0f5fa;
 }
-.ev-cmd-line.selected {
-  background: var(--el-color-primary-light-7, #c6e2ff);
-  color: var(--app-text);
+.ev-cmd-line.empty {
+  min-height: 1.45em;
+  color: transparent;
 }
-.ev-cmd-line.focus {
-  box-shadow: inset 2px 0 0 var(--el-color-primary, #409eff);
+.ev-mark {
+  display: inline-block;
+  width: 1.2em;
+  text-align: center;
+  flex-shrink: 0;
+}
+/* 按指令选择窗分类整组同色 */
+.ev-cmd-line.color-info,
+.ev-cmd-line.color-info .ev-mark,
+.ev-cmd-line.color-info .ev-label,
+.ev-cmd-line.color-info .ev-body { color: #1a6b3c; }
+.ev-cmd-line.color-progress,
+.ev-cmd-line.color-progress .ev-mark,
+.ev-cmd-line.color-progress .ev-label,
+.ev-cmd-line.color-progress .ev-body { color: #c0392b; }
+.ev-cmd-line.color-flow,
+.ev-cmd-line.color-flow .ev-mark,
+.ev-cmd-line.color-flow .ev-label,
+.ev-cmd-line.color-flow .ev-body { color: #2a5db0; }
+.ev-cmd-line.color-party,
+.ev-cmd-line.color-party .ev-mark,
+.ev-cmd-line.color-party .ev-label,
+.ev-cmd-line.color-party .ev-body { color: #0d7377; }
+.ev-cmd-line.color-actor,
+.ev-cmd-line.color-actor .ev-mark,
+.ev-cmd-line.color-actor .ev-label,
+.ev-cmd-line.color-actor .ev-body { color: #e67e22; }
+.ev-cmd-line.color-move,
+.ev-cmd-line.color-move .ev-mark,
+.ev-cmd-line.color-move .ev-label,
+.ev-cmd-line.color-move .ev-body { color: #8b3a2a; }
+.ev-cmd-line.color-character,
+.ev-cmd-line.color-character .ev-mark,
+.ev-cmd-line.color-character .ev-label,
+.ev-cmd-line.color-character .ev-body { color: #a0522d; }
+.ev-cmd-line.color-picture,
+.ev-cmd-line.color-picture .ev-mark,
+.ev-cmd-line.color-picture .ev-label,
+.ev-cmd-line.color-picture .ev-body { color: #7a3e9d; }
+.ev-cmd-line.color-screen,
+.ev-cmd-line.color-screen .ev-mark,
+.ev-cmd-line.color-screen .ev-label,
+.ev-cmd-line.color-screen .ev-body { color: #006d77; }
+.ev-cmd-line.color-audio,
+.ev-cmd-line.color-audio .ev-mark,
+.ev-cmd-line.color-audio .ev-label,
+.ev-cmd-line.color-audio .ev-body { color: #9c2d70; }
+.ev-cmd-line.color-scene,
+.ev-cmd-line.color-scene .ev-mark,
+.ev-cmd-line.color-scene .ev-label,
+.ev-cmd-line.color-scene .ev-body { color: #3d5a80; }
+.ev-cmd-line.color-system,
+.ev-cmd-line.color-system .ev-mark,
+.ev-cmd-line.color-system .ev-label,
+.ev-cmd-line.color-system .ev-body { color: #c2185b; }
+.ev-cmd-line.color-map,
+.ev-cmd-line.color-map .ev-mark,
+.ev-cmd-line.color-map .ev-label,
+.ev-cmd-line.color-map .ev-body { color: #2b6e4f; }
+.ev-cmd-line.color-battle,
+.ev-cmd-line.color-battle .ev-mark,
+.ev-cmd-line.color-battle .ev-label,
+.ev-cmd-line.color-battle .ev-body { color: #9b2226; }
+.ev-cmd-line.color-script .ev-mark,
+.ev-cmd-line.color-script .ev-label { color: #7b2d8e; }
+.ev-cmd-line.color-script .ev-body { color: #6b7280; }
+.ev-script-pad {
+  visibility: hidden;
+  white-space: pre;
+}
+.ev-cmd-line.color-comment,
+.ev-cmd-line.color-comment .ev-mark,
+.ev-cmd-line.color-comment .ev-label,
+.ev-cmd-line.color-comment .ev-body { color: #6a994e; }
+.ev-cmd-line.color-end,
+.ev-cmd-line.color-end .ev-mark { color: #888; }
+.ev-cmd-line.selected,
+.ev-cmd-line.selected .ev-mark,
+.ev-cmd-line.selected .ev-label,
+.ev-note {
+  margin-left: 6px;
+  color: #909399;
+}
+.ev-cmd-line.selected .ev-body,
+.ev-cmd-line.selected[class*='color-'],
+.ev-cmd-line.selected[class*='color-'] .ev-mark,
+.ev-cmd-line.selected[class*='color-'] .ev-label,
+.ev-cmd-line.selected[class*='color-'] .ev-body {
+  background: #2a5db0;
+  color: #fff !important;
+}
+.ev-cmd-line.focus:not(.selected) {
+  box-shadow: inset 2px 0 0 #2a5db0;
 }
 .ev-json {
   margin-top: 6px;
+}
+.ev-json-tree {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--app-border, #ddd);
+  padding: 6px;
+  margin-bottom: 8px;
+  background: #fafafa;
 }
 .ev-json-err {
   color: #f56c6c;
@@ -687,7 +1006,6 @@ export default {
 </style>
 
 <style>
-/* teleport 菜单：沿用全局 .contextmenu，补 disabled */
 .ev-cmd-ctx li.disabled {
   opacity: 0.4;
   pointer-events: none;

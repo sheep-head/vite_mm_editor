@@ -17,11 +17,11 @@
       <el-form-item v-if="searchType === 'name'" label="名称">
         <el-input v-model="nameQuery" placeholder="支持包含匹配" clearable @keyup.enter="runSearch" />
       </el-form-item>
-      <el-form-item v-else-if="searchType === 'switch'" label="开关 ID">
-        <el-input-number v-model="switchId" :min="1" controls-position="right" />
+      <el-form-item v-else-if="searchType === 'switch'" label="开关">
+        <id-name-field v-model="switchId" type="switch" width="240px" />
       </el-form-item>
-      <el-form-item v-else label="变量 ID">
-        <el-input-number v-model="variableId" :min="1" controls-position="right" />
+      <el-form-item v-else label="变量">
+        <id-name-field v-model="variableId" type="variable" width="240px" />
       </el-form-item>
       <el-form-item>
         <el-button type="primary" :loading="searching" @click="runSearch">查找</el-button>
@@ -49,11 +49,13 @@
 
 <script>
 import { mapGetters } from 'vuex'
+import IdNameField from '@/components/database/shared/IdNameField.vue'
 import DataManager from '@/utils/DataManager'
 import { fs, path, isNw } from '@/utils/nw'
 
 export default {
   name: 'EventSearcherDialog',
+  components: { IdNameField },
   props: {
     modelValue: { type: Boolean, default: false },
   },

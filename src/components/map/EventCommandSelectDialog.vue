@@ -102,7 +102,6 @@ export default {
   },
   methods: {
     pick(item) {
-      // 由父组件决定是否关闭（插入需参数时先关墙，取消参数再开回）
       this.$emit('select', item)
     },
   },

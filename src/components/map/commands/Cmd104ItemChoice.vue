@@ -9,8 +9,7 @@
     @update:model-value="$emit('update:modelValue', $event)">
     <el-form size="small" label-width="80px">
       <el-form-item label="变量">
-        <el-input-number v-model="varId" :min="1" controls-position="right" />
-        <el-button size="small" @click="pickerVisible = true">...</el-button>
+        <id-name-field v-model="varId" type="variable" width="220px" />
       </el-form-item>
       <el-form-item label="物品类型">
         <el-select v-model="itemType" style="width: 140px">
@@ -25,23 +24,22 @@
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
       <el-button type="primary" @click="ok">确定</el-button>
     </template>
-    <id-name-picker-dialog v-model="pickerVisible" type="variable" :model-id="varId" @confirm="(id) => (varId = id)" />
   </el-dialog>
 </template>
 
 <script>
-import IdNamePickerDialog from '../pickers/IdNamePickerDialog.vue'
+import IdNameField from '@/components/database/shared/IdNameField.vue'
 
 export default {
   name: 'Cmd104ItemChoice',
-  components: { IdNamePickerDialog },
+  components: { IdNameField },
   props: {
     modelValue: { type: Boolean, default: false },
     command: { type: Object, default: null },
   },
   emits: ['update:modelValue', 'confirm'],
   data() {
-    return { varId: 1, itemType: 2, pickerVisible: false }
+    return { varId: 1, itemType: 2 }
   },
   watch: {
     modelValue: {

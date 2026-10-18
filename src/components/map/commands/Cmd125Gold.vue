@@ -2,14 +2,12 @@
   <el-dialog
     :model-value="modelValue"
     title="增减金币"
-    width="400px"
+    width="420px"
     append-to-body
     destroy-on-close
     :close-on-click-modal="false"
     @update:model-value="$emit('update:modelValue', $event)">
-    <el-form size="small" label-width="72px">
-      <operate-value-fields v-model="ov" />
-    </el-form>
+    <operate-value-fields v-model="ov" />
     <template #footer>
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
       <el-button type="primary" @click="ok">确定</el-button>

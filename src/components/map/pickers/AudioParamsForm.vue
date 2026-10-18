@@ -1,22 +1,25 @@
 <template>
   <div class="audio-params">
     <el-form-item :label="label">
-      <el-input v-model="local.name" placeholder="无扩展名文件名" style="width: 200px" />
+      <el-input :model-value="local.name" readonly placeholder="(无)" style="width: 200px" />
       <el-button size="small" @click="pickerVisible = true">...</el-button>
     </el-form-item>
     <el-form-item label="音量">
-      <el-input-number v-model="local.volume" :min="0" :max="100" controls-position="right" />
+      <span class="audio-params__val">{{ local.volume }}</span>
     </el-form-item>
     <el-form-item label="音调">
-      <el-input-number v-model="local.pitch" :min="50" :max="150" controls-position="right" />
+      <span class="audio-params__val">{{ local.pitch }}</span>
     </el-form-item>
     <el-form-item label="声像">
-      <el-input-number v-model="local.pan" :min="-100" :max="100" controls-position="right" />
+      <span class="audio-params__val">{{ local.pan }}</span>
     </el-form-item>
     <audio-file-picker-dialog
       v-model="pickerVisible"
       :folder="folder"
       :model-name="local.name"
+      :model-volume="local.volume"
+      :model-pitch="local.pitch"
+      :model-pan="local.pan"
       @confirm="onPick" />
   </div>
 </template>
@@ -40,19 +43,29 @@ export default {
     return { pickerVisible: false }
   },
   computed: {
-    local: {
-      get() {
-        return this.modelValue || { name: '', volume: 90, pitch: 100, pan: 0 }
-      },
-      set(v) {
-        this.$emit('update:modelValue', v)
-      },
+    local() {
+      return this.modelValue || { name: '', volume: 90, pitch: 100, pan: 0 }
     },
   },
   methods: {
-    onPick(name) {
-      this.$emit('update:modelValue', { ...this.local, name })
+    onPick(audio) {
+      const next = audio && typeof audio === 'object'
+        ? {
+            name: audio.name || '',
+            volume: Number.isFinite(audio.volume) ? audio.volume : 90,
+            pitch: Number.isFinite(audio.pitch) ? audio.pitch : 100,
+            pan: Number.isFinite(audio.pan) ? audio.pan : 0,
+          }
+        : { ...this.local, name: audio || '' }
+      this.$emit('update:modelValue', next)
     },
   },
 }
 </script>
+
+<style scoped>
+.audio-params__val {
+  min-width: 48px;
+  display: inline-block;
+}
+</style>

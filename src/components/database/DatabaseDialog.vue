@@ -10,6 +10,7 @@
     :close-on-click-modal="false"
     @update:model-value="onVisibleChange">
     <div class="db-dialog-body">
+      <div v-if="dbSkinUrl" class="db-skin" :style="dbSkinStyle" />
       <el-tabs
         v-model="activeTab"
         type="card"
@@ -21,15 +22,16 @@
           :label="tabLabel(tab)"
           :name="tab.name"
           lazy>
-          <database-system-panel
+          <system-section-panel
             v-if="tab.kind === 'system' && activeTab === tab.name"
             :ref="(el) => setPanelRef(tab.name, el)"
-            @dirty-change="(d) => onDirty(tab.name, d)" />
+            :section="tab.section" />
           <database-array-panel
             v-else-if="tab.kind !== 'system' && activeTab === tab.name"
             :ref="(el) => setPanelRef(tab.name, el)"
             :file-name="tab.fileName"
             :fields="tab.fields"
+            :editor="tab.editor || ''"
             @dirty-change="(d) => onDirty(tab.name, d)" />
         </el-tab-pane>
       </el-tabs>
@@ -47,13 +49,17 @@
 </template>
 
 <script>
+import { mapGetters } from 'vuex'
 import DatabaseArrayPanel from './DatabaseArrayPanel.vue'
-import DatabaseSystemPanel from './DatabaseSystemPanel.vue'
+import SystemSectionPanel from './SystemSectionPanel.vue'
 import { DATABASE_TABS } from './dbFieldPresets'
+import { SYSTEM_TAB_NAMES, systemState, resetSystemSession } from './shared/systemSession'
+import { getMapBgSkinPath } from '@/utils/appSettings'
+import { fs } from '@/utils/nw'
 
 export default {
   name: 'DatabaseDialog',
-  components: { DatabaseArrayPanel, DatabaseSystemPanel },
+  components: { DatabaseArrayPanel, SystemSectionPanel },
   props: {
     modelValue: { type: Boolean, default: false },
   },
@@ -65,9 +71,27 @@ export default {
       dirtyMap: {},
       panelRefs: {},
       switching: false,
+      systemBridge: systemState,
     }
   },
   computed: {
+    ...mapGetters(['editorUi']),
+    dbSkinUrl() {
+      const name = this.editorUi && this.editorUi.dbBgSkin
+      if (!name || !fs) return ''
+      const p = getMapBgSkinPath(name)
+      if (!p || !fs.existsSync(p)) return ''
+      return 'file:///' + String(p).replace(/\\/g, '/') + '?t=' + encodeURIComponent(name)
+    },
+    dbSkinStyle() {
+      const op = this.editorUi && typeof this.editorUi.dbBgSkinOpacity === 'number'
+        ? this.editorUi.dbBgSkinOpacity
+        : 1
+      return {
+        backgroundImage: `url("${this.dbSkinUrl}")`,
+        opacity: op,
+      }
+    },
     currentDirty() {
       return !!this.dirtyMap[this.activeTab]
     },
@@ -100,7 +124,11 @@ export default {
         return false
       }
     },
+    isSystemTab(name) {
+      return SYSTEM_TAB_NAMES.includes(name)
+    },
     async beforeLeaveTab(activeName, oldName) {
+      if (this.isSystemTab(activeName) && this.isSystemTab(oldName)) return true
       if (!oldName || !this.dirtyMap[oldName]) return true
       try {
         await this.$confirm('当前页有未保存更改，切换将丢失未保存内容。是否继续？', '提示', {
@@ -108,9 +136,18 @@ export default {
           confirmButtonText: '继续切换',
           cancelButtonText: '取消',
         })
-        const panel = this.panelRefs[oldName]
-        if (panel && typeof panel.reload === 'function') panel.reload()
-        this.dirtyMap = { ...this.dirtyMap, [oldName]: false }
+        if (this.isSystemTab(oldName)) {
+          resetSystemSession()
+          const patch = {}
+          SYSTEM_TAB_NAMES.forEach((n) => {
+            patch[n] = false
+          })
+          this.dirtyMap = { ...this.dirtyMap, ...patch }
+        } else {
+          const panel = this.panelRefs[oldName]
+          if (panel && typeof panel.reload === 'function') panel.reload()
+          this.dirtyMap = { ...this.dirtyMap, [oldName]: false }
+        }
         return true
       } catch (e) {
         return false
@@ -140,7 +177,17 @@ export default {
         this.$emit('update:modelValue', false)
         return
       }
+      resetSystemSession()
       this.$emit('update:modelValue', true)
+    },
+  },
+  watch: {
+    'systemBridge.dirty'(d) {
+      const patch = {}
+      SYSTEM_TAB_NAMES.forEach((n) => {
+        patch[n] = !!d
+      })
+      this.dirtyMap = { ...this.dirtyMap, ...patch }
     },
   },
 }
@@ -150,11 +197,22 @@ export default {
 .db-dialog-body {
   height: min(78vh, 720px);
   min-height: 420px;
+  position: relative;
+}
+.db-skin {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  pointer-events: none;
+  z-index: 0;
 }
 .db-tabs {
   height: 100%;
   display: flex;
   flex-direction: column;
+  position: relative;
+  z-index: 1;
 }
 .db-tabs :deep(.el-tabs__header) {
   flex-shrink: 0;

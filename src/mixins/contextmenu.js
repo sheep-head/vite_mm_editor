@@ -28,19 +28,26 @@ export const CONTEXTMENU_SLOT = {
   },
   methods: {
     openMenu(e) {
-      const menuMinWidth = 105
-      const offsetLeft = this.$el.getBoundingClientRect().left
-      const offsetWidth = this.$el.offsetWidth
-      const maxLeft = offsetWidth - menuMinWidth
-      const left = e.clientX - offsetLeft
-
-      if (left > maxLeft) {
-        this.menu.left = maxLeft;
-      } else {
-        this.menu.left = left;
-      }
-      this.menu.top = e.clientY - 50;
-      this.menu.visible = true;
+      this.menu.visible = true
+      this.menu.left = 0
+      this.menu.top = 0
+      this.$nextTick(() => {
+        const el = this.$el && this.$el.querySelector('.contextmenu')
+        if (!el) return
+        const h = el.offsetHeight || 0
+        const w = el.offsetWidth || 0
+        const parent = el.offsetParent || this.$el
+        const prect = parent.getBoundingClientRect()
+        const pad = 4
+        let top = e.clientY - prect.top
+        let left = e.clientX - prect.left
+        if (e.clientY + h > window.innerHeight - pad) top = e.clientY - h - prect.top
+        if (e.clientX + w > window.innerWidth - pad) left = e.clientX - w - prect.left
+        if (top < 0) top = 0
+        if (left < 0) left = 0
+        this.menu.top = top
+        this.menu.left = left
+      })
     },
     closeMenu() {
       this.menu.visible = false;

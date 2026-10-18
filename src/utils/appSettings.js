@@ -54,6 +54,66 @@ export function saveSettings(partial) {
   }
 }
 
+export const DEFAULT_EDITOR_UI = {
+  charPickColor: 'rgba(42,93,176,1)',
+  charPickWidth: 3,
+  scrollTrack: 'rgba(40,40,40,0.55)',
+  scrollThumb: 'rgba(200,200,200,0.95)',
+  scrollSize: 14,
+  commandTextSelectable: false,
+  showCommandJson: true,
+  confirmDiscardEvent: true,
+  gridColor: 'rgba(255,255,255,0.25)',
+  gridWidth: 1,
+  /** 地图外框（整图边界，非满网格） */
+  mapEdgeVisible: true,
+  mapEdgeColor: 'rgba(255,80,80,0.85)',
+  focusRingMode: 'untilAction',
+  focusRingSeconds: 2,
+  /** 事件白框内部底色 */
+  eventFillColor: 'rgba(0,0,0,0.3)',
+  /** center 取帧正中；fit 整帧缩小到白框内 */
+  eventLargeFit: 'center',
+  /** 空/透明 → 棋盘格；否则铺纯色（不随地图滚动） */
+  mapEmptyColor: '',
+  blockedMapIds: [],
+  /** dataPath 下的文件名，空为无 */
+  mapBgSkin: '',
+  /** 背景皮肤不透明度 0–1 */
+  mapBgSkinOpacity: 1,
+  dbBgSkin: '',
+  dbBgSkinOpacity: 1,
+  /** 测试游戏：启动命令（如 Game.exe 或 nw .） */
+  playtestCommand: '',
+  /** 测试游戏工作目录；空则用当前工作空间 */
+  playtestCwd: '',
+}
+
+/** 空白底是否使用棋盘格（未设色或完全透明） */
+export function isMapEmptyCheckerboard(color) {
+  const c = String(color || '').trim()
+  if (!c) return true
+  const m = c.match(/rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+(?:\s*,\s*([\d.]+))?\s*\)/i)
+  if (m && m[1] != null && Number(m[1]) === 0) return true
+  if (/^#?[0-9a-f]{8}$/i.test(c.replace('#', '')) && c.slice(-2).toLowerCase() === '00') return true
+  return false
+}
+
+export function getMapBgSkinPath(fileName) {
+  const dir = getDataPath()
+  if (!dir || !path || !fileName) return null
+  return path.join(dir, fileName)
+}
+
+export function applyEditorUiCss(ui) {
+  if (typeof document === 'undefined') return
+  const s = document.documentElement.style
+  const size = Math.max(8, Number(ui && ui.scrollSize) || 14)
+  s.setProperty('--map-scroll-size', size + 'px')
+  s.setProperty('--map-scroll-track', (ui && ui.scrollTrack) || DEFAULT_EDITOR_UI.scrollTrack)
+  s.setProperty('--map-scroll-thumb', (ui && ui.scrollThumb) || DEFAULT_EDITOR_UI.scrollThumb)
+}
+
 export function saveWorkspace(workSpace) {
   return saveSettings({ workSpace })
 }

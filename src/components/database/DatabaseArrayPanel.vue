@@ -14,47 +14,115 @@
             :key="item.id"
             :class="{ active: current && current.id === item.id }"
             @click="selectItem(item)">
-            {{ item.id }}:{{ item.name || '(空)' }}
+            {{ padId(item.id) }}:{{ item.name || '(空)' }}
           </li>
         </ul>
       </el-scrollbar>
+      <div class="db-list-foot">
+        <el-button size="small" class="max-btn" @click="changeMax">更改最大值…</el-button>
+      </div>
     </aside>
+
     <main class="db-form" v-if="current && current.id">
-      <el-form label-width="88px" size="small" @submit.prevent>
-        <el-form-item
-          v-for="field in fields"
-          :key="field.key"
-          :label="field.label"
-          :class="{ 'db-cmd-list-item': field.type === 'eventCommandList' }">
-          <el-input
-            v-if="field.type === 'text' || !field.type"
-            v-model="current[field.key]"
-            :type="field.inputType || 'text'" />
-          <el-input-number
-            v-else-if="field.type === 'number'"
-            v-model="current[field.key]"
-            :controls="false"
-            class="db-num" />
-          <el-switch
-            v-else-if="field.type === 'boolean'"
-            v-model="current[field.key]" />
-          <el-input
-            v-else-if="field.type === 'textarea'"
-            v-model="current[field.key]"
-            type="textarea"
-            :rows="field.rows || 3" />
-          <el-input
-            v-else-if="field.type === 'json'"
-            :model-value="jsonText(field.key)"
-            type="textarea"
-            :rows="field.rows || 8"
-            @update:model-value="(v) => setJson(field.key, v)" />
-          <event-command-list-editor
-            v-else-if="field.type === 'eventCommandList'"
-            v-model="current[field.key]"
-            class="db-cmd-list" />
-        </el-form-item>
-      </el-form>
+      <actor-editor-panel v-if="editor === 'actors'" v-model="current" />
+      <class-editor-panel v-else-if="editor === 'classes'" v-model="current" />
+      <skill-editor-panel v-else-if="editor === 'skills'" v-model="current" />
+      <item-editor-panel v-else-if="editor === 'items'" v-model="current" />
+      <weapon-editor-panel v-else-if="editor === 'weapons'" v-model="current" />
+      <armor-editor-panel v-else-if="editor === 'armors'" v-model="current" />
+      <enemy-editor-panel v-else-if="editor === 'enemies'" v-model="current" />
+      <troop-editor-panel v-else-if="editor === 'troops'" v-model="current" />
+      <state-editor-panel v-else-if="editor === 'states'" v-model="current" />
+      <animation-editor-panel v-else-if="editor === 'animations'" v-model="current" />
+      <tileset-editor-panel v-else-if="editor === 'tilesets'" v-model="current" />
+      <common-event-editor-panel v-else-if="editor === 'commonEvents'" v-model="current" />
+      <template v-else>
+        <el-form label-width="88px" size="small" @submit.prevent>
+          <el-form-item
+            v-for="field in fields"
+            :key="field.key"
+            :label="field.label"
+            :class="{
+              'db-cmd-list-item':
+                field.type === 'eventCommandList' || field.type === 'animationEditor',
+            }">
+            <el-input
+              v-if="field.type === 'text' || !field.type"
+              v-model="current[field.key]"
+              :type="field.inputType || 'text'" />
+            <el-input-number
+              v-else-if="field.type === 'number'"
+              v-model="current[field.key]"
+              :controls="false"
+              class="db-num" />
+            <el-switch v-else-if="field.type === 'boolean'" v-model="current[field.key]" />
+            <el-input
+              v-else-if="field.type === 'textarea'"
+              v-model="current[field.key]"
+              type="textarea"
+              :rows="field.rows || 3" />
+            <el-input
+              v-else-if="field.type === 'json'"
+              :model-value="jsonText(field.key)"
+              type="textarea"
+              :rows="field.rows || 8"
+              @update:model-value="(v) => setJson(field.key, v)" />
+            <event-command-list-editor
+              v-else-if="field.type === 'eventCommandList'"
+              v-model="current[field.key]"
+              :show-title="false"
+              class="db-cmd-list" />
+            <div v-else-if="field.type === 'characterSheet'" class="db-sheet-field">
+              <el-input v-model="current[field.key]" style="width: 140px" />
+              <el-input-number
+                v-if="field.indexKey"
+                v-model="current[field.indexKey]"
+                :min="0"
+                :max="7"
+                :controls="false"
+                class="db-num-sm" />
+              <el-button size="small" @click="openSheetPicker(field)">选择…</el-button>
+            </div>
+            <div v-else-if="field.type === 'faceSheet'" class="db-sheet-field">
+              <el-input v-model="current[field.key]" style="width: 140px" />
+              <el-input-number
+                v-if="field.indexKey"
+                v-model="current[field.indexKey]"
+                :min="0"
+                :max="7"
+                :controls="false"
+                class="db-num-sm" />
+              <el-button size="small" @click="openSheetPicker(field)">选择…</el-button>
+            </div>
+            <div v-else-if="field.type === 'battlerImage'" class="db-sheet-field">
+              <el-input v-model="current[field.key]" style="width: 160px" />
+              <el-button size="small" @click="openSheetPicker(field)">选择…</el-button>
+            </div>
+            <animation-editor-panel
+              v-else-if="field.type === 'animationEditor'"
+              v-model="current"
+              class="db-anim-editor" />
+          </el-form-item>
+        </el-form>
+
+        <character-sheet-picker-dialog
+          v-model="charPickerVisible"
+          :model-name="pickerName"
+          :model-index="pickerIndex"
+          @confirm="onCharPicked" />
+        <face-sheet-picker-dialog
+          v-model="facePickerVisible"
+          :model-name="pickerName"
+          :model-index="pickerIndex"
+          @confirm="onFacePicked" />
+        <battler-picker-dialog
+          v-model="battlerPickerVisible"
+          :folder="battlerFolder"
+          :model-name="pickerName"
+          :model-hue="pickerHue"
+          :show-hue="battlerShowHue"
+          @confirm="onBattlerPicked" />
+      </template>
     </main>
     <main class="db-form db-empty" v-else>请选择左侧条目</main>
   </div>
@@ -63,14 +131,48 @@
 <script>
 import DataManager from '@/utils/DataManager'
 import EventCommandListEditor from '@/components/map/EventCommandListEditor.vue'
+import CharacterSheetPickerDialog from '@/components/map/pickers/CharacterSheetPickerDialog.vue'
+import FaceSheetPickerDialog from '@/components/map/pickers/FaceSheetPickerDialog.vue'
+import BattlerPickerDialog from '@/components/map/pickers/BattlerPickerDialog.vue'
+import AnimationEditorPanel from './AnimationEditorPanel.vue'
+import ActorEditorPanel from './ActorEditorPanel.vue'
+import ClassEditorPanel from './ClassEditorPanel.vue'
+import SkillEditorPanel from './SkillEditorPanel.vue'
+import ItemEditorPanel from './ItemEditorPanel.vue'
+import WeaponEditorPanel from './WeaponEditorPanel.vue'
+import ArmorEditorPanel from './ArmorEditorPanel.vue'
+import EnemyEditorPanel from './EnemyEditorPanel.vue'
+import TroopEditorPanel from './TroopEditorPanel.vue'
+import StateEditorPanel from './StateEditorPanel.vue'
+import TilesetEditorPanel from './TilesetEditorPanel.vue'
+import CommonEventEditorPanel from './CommonEventEditorPanel.vue'
+import { defaultByFileName, normalizeByEditor } from './shared/dbDefaults'
 
 export default {
   name: 'DatabaseArrayPanel',
-  components: { EventCommandListEditor },
+  components: {
+    EventCommandListEditor,
+    CharacterSheetPickerDialog,
+    FaceSheetPickerDialog,
+    BattlerPickerDialog,
+    AnimationEditorPanel,
+    ActorEditorPanel,
+    ClassEditorPanel,
+    SkillEditorPanel,
+    ItemEditorPanel,
+    WeaponEditorPanel,
+    ArmorEditorPanel,
+    EnemyEditorPanel,
+    TroopEditorPanel,
+    StateEditorPanel,
+    TilesetEditorPanel,
+    CommonEventEditorPanel,
+  },
   props: {
     fileName: { type: String, required: true },
     fields: { type: Array, default: () => [] },
-    /** 父级在切换 Tab / 关闭前可询问 */
+    /** actors | classes | … | animations | '' */
+    editor: { type: String, default: '' },
     active: { type: Boolean, default: true },
   },
   emits: ['dirty-change'],
@@ -82,6 +184,15 @@ export default {
       dirty: false,
       jsonErrors: {},
       _watchStop: null,
+      charPickerVisible: false,
+      facePickerVisible: false,
+      battlerPickerVisible: false,
+      pickerField: null,
+      pickerName: '',
+      pickerIndex: 0,
+      pickerHue: 0,
+      battlerFolder: 'enemies',
+      battlerShowHue: true,
     }
   },
   computed: {
@@ -112,6 +223,9 @@ export default {
     this.clearWatch()
   },
   methods: {
+    padId(id) {
+      return String(id).padStart(4, '0')
+    },
     clearWatch() {
       if (this._watchStop) {
         this._watchStop()
@@ -128,7 +242,6 @@ export default {
         this.$message.error(`${this.fileName} 加载失败或不是数组`)
         return
       }
-      // 深拷贝，避免直接改缓存引用
       this.dataList = JSON.parse(JSON.stringify(raw))
       this.dirty = false
       const first = this.dataList.find((x) => x && x.id > 0)
@@ -139,6 +252,7 @@ export default {
       this.current = item
       this.jsonErrors = {}
       this.normalizeCommandLists(item)
+      if (item && this.editor) normalizeByEditor(this.editor, item)
       if (item && markDirtyWatch) {
         this._watchStop = this.$watch(
           'current',
@@ -158,6 +272,32 @@ export default {
         }
       }
     },
+    changeMax() {
+      const curMax = Math.max(0, (this.dataList || []).length - 1)
+      const input = window.prompt('更改最大值（有效条目数，不含 index 0）', String(curMax))
+      if (input == null) return
+      const next = parseInt(input, 10)
+      if (!Number.isFinite(next) || next < 1) {
+        this.$message.warning('请输入 ≥ 1 的整数')
+        return
+      }
+      if (next === curMax) return
+      if (next < curMax) {
+        if (!window.confirm(`将删除 ID ${next + 1}～${curMax} 的条目，继续？`)) return
+        this.dataList.length = next + 1
+      } else {
+        while (this.dataList.length <= next) {
+          const id = this.dataList.length
+          this.dataList.push(defaultByFileName(this.fileName, id))
+        }
+      }
+      // ensure index 0 is null
+      if (this.dataList[0] != null) this.dataList[0] = null
+      this.dirty = true
+      const keep = this.current && this.current.id <= next ? this.current : this.dataList.find((x) => x && x.id > 0)
+      this.selectItem(keep || null, true)
+      this.$message.success(`最大值已设为 ${next}`)
+    },
     jsonText(key) {
       try {
         return JSON.stringify(this.current[key], null, 2)
@@ -175,7 +315,38 @@ export default {
         this.$message.warning(`${key} JSON 无效，未写入`)
       }
     },
-    /** @returns {boolean} */
+    openSheetPicker(field) {
+      if (!this.current || !field) return
+      this.pickerField = field
+      this.pickerName = this.current[field.key] || ''
+      this.pickerIndex = field.indexKey ? this.current[field.indexKey] || 0 : 0
+      this.pickerHue = field.hueKey ? this.current[field.hueKey] || 0 : 0
+      if (field.type === 'characterSheet') this.charPickerVisible = true
+      else if (field.type === 'faceSheet') this.facePickerVisible = true
+      else if (field.type === 'battlerImage') {
+        this.battlerFolder = field.folder || 'enemies'
+        this.battlerShowHue = field.showHue !== false
+        this.battlerPickerVisible = true
+      }
+    },
+    onCharPicked({ name, index }) {
+      if (!this.current || !this.pickerField) return
+      this.current[this.pickerField.key] = name || ''
+      if (this.pickerField.indexKey) this.current[this.pickerField.indexKey] = index || 0
+      this.dirty = true
+    },
+    onFacePicked({ name, index }) {
+      if (!this.current || !this.pickerField) return
+      this.current[this.pickerField.key] = name || ''
+      if (this.pickerField.indexKey) this.current[this.pickerField.indexKey] = index || 0
+      this.dirty = true
+    },
+    onBattlerPicked({ name, hue }) {
+      if (!this.current || !this.pickerField) return
+      this.current[this.pickerField.key] = name || ''
+      if (this.pickerField.hueKey) this.current[this.pickerField.hueKey] = hue || 0
+      this.dirty = true
+    },
     save() {
       if (Object.keys(this.jsonErrors).length) {
         this.$message.error('存在无效 JSON，请先修正')
@@ -221,6 +392,14 @@ export default {
 .db-list-scroll {
   flex: 1;
   min-height: 0;
+}
+.db-list-foot {
+  padding: 8px;
+  border-top: 1px solid var(--app-border);
+  flex-shrink: 0;
+}
+.max-btn {
+  width: 100%;
 }
 .db-list ul {
   list-style: none;
@@ -270,5 +449,17 @@ export default {
 }
 .db-cmd-list :deep(.ev-cmd-list) {
   max-height: 52vh;
+}
+.db-sheet-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.db-num-sm {
+  width: 72px;
+}
+.db-anim-editor {
+  width: 100%;
 }
 </style>

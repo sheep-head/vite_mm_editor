@@ -2,47 +2,43 @@
   <el-dialog
     :model-value="modelValue"
     title="队伍管理"
-    width="400px"
+    width="420px"
     append-to-body
     destroy-on-close
     :close-on-click-modal="false"
     @update:model-value="$emit('update:modelValue', $event)">
-    <el-form size="small" label-width="72px">
-      <el-form-item label="角色">
-        <el-input-number v-model="actorId" :min="1" controls-position="right" />
-        <el-button size="small" @click="pickerVisible = true">...</el-button>
-      </el-form-item>
-      <el-form-item label="操作">
-        <el-radio-group v-model="op">
-          <el-radio :value="0">加入</el-radio>
-          <el-radio :value="1">离开</el-radio>
-        </el-radio-group>
-      </el-form-item>
-      <el-form-item v-if="op === 0" label="初始化">
-        <el-checkbox v-model="initialize">初始化</el-checkbox>
-      </el-form-item>
-    </el-form>
+    <div class="pick">
+      <div class="lab">角色:</div>
+      <id-name-field v-model="actorId" type="actor" width="320px" />
+    </div>
+    <db-group-box title="操作">
+      <el-radio-group v-model="op">
+        <el-radio :value="0">入队</el-radio>
+        <el-radio :value="1">离队</el-radio>
+      </el-radio-group>
+    </db-group-box>
+    <el-checkbox v-model="initialize" class="extra" :disabled="op !== 0">初始化</el-checkbox>
     <template #footer>
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
       <el-button type="primary" @click="ok">确定</el-button>
     </template>
-    <id-name-picker-dialog v-model="pickerVisible" type="actor" :model-id="actorId" @confirm="(id) => (actorId = id)" />
   </el-dialog>
 </template>
 
 <script>
-import IdNamePickerDialog from '../pickers/IdNamePickerDialog.vue'
+import IdNameField from '@/components/database/shared/IdNameField.vue'
+import DbGroupBox from '@/components/database/shared/DbGroupBox.vue'
 
 export default {
   name: 'Cmd129Party',
-  components: { IdNamePickerDialog },
+  components: { IdNameField, DbGroupBox },
   props: {
     modelValue: { type: Boolean, default: false },
     command: { type: Object, default: null },
   },
   emits: ['update:modelValue', 'confirm'],
   data() {
-    return { actorId: 1, op: 0, initialize: true, pickerVisible: false }
+    return { actorId: 1, op: 0, initialize: true }
   },
   watch: {
     modelValue: {
@@ -70,3 +66,16 @@ export default {
   },
 }
 </script>
+
+<style scoped>
+.pick {
+  margin-bottom: 10px;
+}
+.lab {
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+.extra {
+  margin-top: 10px;
+}
+</style>

@@ -1,41 +1,45 @@
 <template>
   <div class="operate-value">
-    <el-form-item label="操作">
-      <el-radio-group v-model="local.operation">
+    <db-group-box title="操作" class="blk">
+      <el-radio-group :model-value="operation" @update:model-value="onOp">
         <el-radio :value="0">增加</el-radio>
         <el-radio :value="1">减少</el-radio>
       </el-radio-group>
-    </el-form-item>
-    <el-form-item label="运算数">
-      <el-radio-group v-model="local.operandType">
-        <el-radio :value="0">常数</el-radio>
-        <el-radio :value="1">变量</el-radio>
-      </el-radio-group>
-    </el-form-item>
-    <el-form-item v-if="local.operandType === 0" label="常数">
-      <el-input-number v-model="local.operand" :min="0" controls-position="right" />
-    </el-form-item>
-    <el-form-item v-else label="变量">
-      <el-input-number v-model="local.operand" :min="1" controls-position="right" />
-      <el-button size="small" @click="pickerVisible = true">...</el-button>
-    </el-form-item>
-    <id-name-picker-dialog
-      v-model="pickerVisible"
-      type="variable"
-      :model-id="local.operand"
-      @confirm="onPick" />
+    </db-group-box>
+    <db-group-box title="操作数">
+      <div class="row">
+        <el-radio :model-value="operandType" :value="0" @update:model-value="onType">常量</el-radio>
+        <el-input-number
+          :model-value="constValue"
+          :min="0"
+          :disabled="operandType !== 0"
+          controls-position="right"
+          style="width: 140px"
+          @update:model-value="onConst" />
+      </div>
+      <div class="row">
+        <el-radio :model-value="operandType" :value="1" @update:model-value="onType">变量</el-radio>
+        <id-name-field
+          :model-value="varId"
+          type="variable"
+          width="240px"
+          :disabled="operandType !== 1"
+          @update:model-value="onVar" />
+      </div>
+    </db-group-box>
   </div>
 </template>
 
 <script>
-import IdNamePickerDialog from './IdNamePickerDialog.vue'
+import IdNameField from '@/components/database/shared/IdNameField.vue'
+import DbGroupBox from '@/components/database/shared/DbGroupBox.vue'
 
 /**
- * MZ operateValue 三段：operation(0增/1减), operandType(0常数/1变量), operand
+ * MZ operateValue：operation(0增/1减), operandType(0常量/1变量), operand
  */
 export default {
   name: 'OperateValueFields',
-  components: { IdNamePickerDialog },
+  components: { IdNameField, DbGroupBox },
   props: {
     modelValue: {
       type: Object,
@@ -44,22 +48,66 @@ export default {
   },
   emits: ['update:modelValue'],
   data() {
-    return { pickerVisible: false }
+    return {
+      operation: 0,
+      operandType: 0,
+      constValue: 1,
+      varId: 1,
+    }
   },
-  computed: {
-    local: {
-      get() {
-        return this.modelValue || { operation: 0, operandType: 0, operand: 1 }
-      },
-      set(v) {
-        this.$emit('update:modelValue', v)
+  watch: {
+    modelValue: {
+      immediate: true,
+      handler(v) {
+        const m = v || {}
+        this.operation = m.operation === 1 ? 1 : 0
+        this.operandType = m.operandType === 1 ? 1 : 0
+        const n = Number(m.operand)
+        const value = Number.isFinite(n) ? n : 0
+        if (this.operandType === 0) this.constValue = value
+        else this.varId = value || 1
       },
     },
   },
   methods: {
-    onPick(id) {
-      this.$emit('update:modelValue', { ...this.local, operand: id })
+    push() {
+      this.$emit('update:modelValue', {
+        operation: this.operation,
+        operandType: this.operandType,
+        operand: this.operandType === 0 ? this.constValue : this.varId,
+      })
+    },
+    onOp(v) {
+      this.operation = v === 1 ? 1 : 0
+      this.push()
+    },
+    onType(v) {
+      this.operandType = v === 1 ? 1 : 0
+      this.push()
+    },
+    onConst(v) {
+      this.constValue = Number(v) || 0
+      this.push()
+    },
+    onVar(id) {
+      this.varId = Number(id) || 0
+      this.push()
     },
   },
 }
 </script>
+
+<style scoped>
+.blk {
+  margin-bottom: 10px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.row:last-child {
+  margin-bottom: 0;
+}
+</style>

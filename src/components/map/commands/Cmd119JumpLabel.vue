@@ -2,14 +2,23 @@
   <el-dialog
     :model-value="modelValue"
     title="转到标签"
-    width="360px"
+    width="400px"
     append-to-body
     destroy-on-close
     :close-on-click-modal="false"
     @update:model-value="$emit('update:modelValue', $event)">
     <el-form size="small" label-width="56px">
       <el-form-item label="标签">
-        <el-input v-model="label" placeholder="要跳转的标签名" />
+        <el-select
+          v-model="label"
+          filterable
+          allow-create
+          default-first-option
+          clearable
+          placeholder="选择或输入标签名"
+          style="width: 100%">
+          <el-option v-for="name in labelOptions" :key="name" :label="name" :value="name" />
+        </el-select>
       </el-form-item>
     </el-form>
     <template #footer>
@@ -25,10 +34,26 @@ export default {
   props: {
     modelValue: { type: Boolean, default: false },
     command: { type: Object, default: null },
+    commandList: { type: Array, default: () => [] },
   },
   emits: ['update:modelValue', 'confirm'],
   data() {
     return { label: '' }
+  },
+  computed: {
+    labelOptions() {
+      const seen = new Set()
+      const out = []
+      const list = Array.isArray(this.commandList) ? this.commandList : []
+      list.forEach((cmd) => {
+        if (!cmd || cmd.code !== 118) return
+        const name = cmd.parameters && cmd.parameters[0] != null ? String(cmd.parameters[0]) : ''
+        if (!name || seen.has(name)) return
+        seen.add(name)
+        out.push(name)
+      })
+      return out
+    },
   },
   watch: {
     modelValue: {

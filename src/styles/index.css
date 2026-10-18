@@ -154,3 +154,15 @@ ul{
 .contextmenu li:hover {
     background: var(--app-contextmenu-hover);
 }
+
+.el-form-item__label,
+.el-dialog__title,
+.el-tabs__item,
+.db-group-title,
+.lab,
+.sec-title,
+.ev-cmd-title,
+.mtp-title,
+.winTitleDiv {
+    user-select: none;
+}

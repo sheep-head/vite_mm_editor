@@ -2,8 +2,7 @@
   <el-dialog :model-value="modelValue" title="获取指定位置的信息" width="440px" append-to-body destroy-on-close :close-on-click-modal="false" @update:model-value="$emit('update:modelValue', $event)">
     <el-form size="small" label-width="88px">
       <el-form-item label="变量">
-        <el-input-number v-model="varId" :min="1" controls-position="right" />
-        <el-button size="small" @click="varPicker = true">...</el-button>
+        <id-name-field v-model="varId" type="variable" width="220px" />
       </el-form-item>
       <el-form-item label="信息类型">
         <el-select v-model="infoType" style="width: 160px">
@@ -21,24 +20,25 @@
           <el-radio :value="1">变量</el-radio>
         </el-radio-group>
       </el-form-item>
-      <el-form-item :label="direct === 0 ? 'X' : 'X变量'"><el-input-number v-model="x" :min="0" controls-position="right" /></el-form-item>
-      <el-form-item :label="direct === 0 ? 'Y' : 'Y变量'"><el-input-number v-model="y" :min="0" controls-position="right" /></el-form-item>
+      <el-form-item v-if="direct === 0" label="X"><el-input-number v-model="x" :min="0" controls-position="right" /></el-form-item>
+      <el-form-item v-else label="X变量"><id-name-field v-model="x" type="variable" width="220px" /></el-form-item>
+      <el-form-item v-if="direct === 0" label="Y"><el-input-number v-model="y" :min="0" controls-position="right" /></el-form-item>
+      <el-form-item v-else label="Y变量"><id-name-field v-model="y" type="variable" width="220px" /></el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
       <el-button type="primary" @click="ok">确定</el-button>
     </template>
-    <id-name-picker-dialog v-model="varPicker" type="variable" :model-id="varId" @confirm="(id) => (varId = id)" />
   </el-dialog>
 </template>
 <script>
-import IdNamePickerDialog from '../pickers/IdNamePickerDialog.vue'
+import IdNameField from '@/components/database/shared/IdNameField.vue'
 export default {
   name: 'Cmd285GetLocation',
-  components: { IdNamePickerDialog },
+  components: { IdNameField },
   props: { modelValue: Boolean, command: Object },
   emits: ['update:modelValue', 'confirm'],
-  data() { return { varId: 1, infoType: 0, direct: 0, x: 0, y: 0, varPicker: false } },
+  data() { return { varId: 1, infoType: 0, direct: 0, x: 0, y: 0 } },
   watch: {
     modelValue: {
       immediate: true,

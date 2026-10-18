@@ -2,33 +2,30 @@
   <el-dialog
     :model-value="modelValue"
     title="增减物品"
-    width="420px"
+    width="440px"
     append-to-body
     destroy-on-close
     :close-on-click-modal="false"
     @update:model-value="$emit('update:modelValue', $event)">
-    <el-form size="small" label-width="72px">
-      <el-form-item label="物品">
-        <el-input-number v-model="itemId" :min="1" controls-position="right" />
-        <el-button size="small" @click="pickerVisible = true">...</el-button>
-      </el-form-item>
-      <operate-value-fields v-model="ov" />
-    </el-form>
+    <div class="pick">
+      <div class="lab">物品:</div>
+      <id-name-field v-model="itemId" type="item" width="320px" />
+    </div>
+    <operate-value-fields v-model="ov" />
     <template #footer>
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
       <el-button type="primary" @click="ok">确定</el-button>
     </template>
-    <id-name-picker-dialog v-model="pickerVisible" type="item" :model-id="itemId" @confirm="(id) => (itemId = id)" />
   </el-dialog>
 </template>
 
 <script>
-import IdNamePickerDialog from '../pickers/IdNamePickerDialog.vue'
+import IdNameField from '@/components/database/shared/IdNameField.vue'
 import OperateValueFields from '../pickers/OperateValueFields.vue'
 
 export default {
   name: 'Cmd126Item',
-  components: { IdNamePickerDialog, OperateValueFields },
+  components: { IdNameField, OperateValueFields },
   props: {
     modelValue: { type: Boolean, default: false },
     command: { type: Object, default: null },
@@ -38,7 +35,6 @@ export default {
     return {
       itemId: 1,
       ov: { operation: 0, operandType: 0, operand: 1 },
-      pickerVisible: false,
     }
   },
   watch: {
@@ -66,3 +62,13 @@ export default {
   },
 }
 </script>
+
+<style scoped>
+.pick {
+  margin-bottom: 10px;
+}
+.lab {
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+</style>

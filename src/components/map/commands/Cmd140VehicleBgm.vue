@@ -1,46 +1,56 @@
 <template>
-  <el-dialog :model-value="modelValue" title="更改载具背景音乐" width="440px" append-to-body destroy-on-close :close-on-click-modal="false" @update:model-value="$emit('update:modelValue', $event)">
-    <el-form size="small" label-width="72px">
-      <el-form-item label="载具">
-        <el-select v-model="vehicle" style="width: 140px">
-          <el-option :value="0" label="小舟" />
-          <el-option :value="1" label="大船" />
-          <el-option :value="2" label="飞艇" />
-        </el-select>
-      </el-form-item>
-      <audio-params-form v-model="audio" folder="bgm" />
-    </el-form>
-    <template #footer>
-      <el-button @click="$emit('update:modelValue', false)">取消</el-button>
-      <el-button type="primary" @click="ok">确定</el-button>
+  <audio-file-picker-dialog
+    :model-value="modelValue"
+    dialog-title="更改载具背景音乐"
+    folder="bgm"
+    :model-name="audio.name"
+    :model-volume="audio.volume"
+    :model-pitch="audio.pitch"
+    :model-pan="audio.pan"
+    @update:model-value="$emit('update:modelValue', $event)"
+    @confirm="onConfirm">
+    <template #extra>
+      <el-form size="small" label-width="56px" inline>
+        <el-form-item label="载具">
+          <el-select v-model="vehicle" style="width: 140px">
+            <el-option :value="0" label="小舟" />
+            <el-option :value="1" label="大船" />
+            <el-option :value="2" label="飞艇" />
+          </el-select>
+        </el-form-item>
+      </el-form>
     </template>
-  </el-dialog>
+  </audio-file-picker-dialog>
 </template>
 <script>
-import AudioParamsForm from '../pickers/AudioParamsForm.vue'
+import AudioFilePickerDialog from '../pickers/AudioFilePickerDialog.vue'
 export default {
   name: 'Cmd140VehicleBgm',
-  components: { AudioParamsForm },
+  components: { AudioFilePickerDialog },
   props: { modelValue: Boolean, command: Object },
   emits: ['update:modelValue', 'confirm'],
-  data() { return { vehicle: 0, audio: { name: '', volume: 90, pitch: 100, pan: 0 } } },
+  data() {
+    return { vehicle: 0, audio: { name: '', volume: 90, pitch: 100, pan: 0 } }
+  },
   watch: {
-    modelValue: { immediate: true, handler(v) {
-      if (!v) return
-      const p = (this.command && this.command.parameters) || [0, {}]
-      this.vehicle = p[0] || 0
-      const a = p[1] || {}
-      this.audio = { name: a.name || '', volume: a.volume ?? 90, pitch: a.pitch ?? 100, pan: a.pan ?? 0 }
-    }},
+    modelValue: {
+      immediate: true,
+      handler(v) {
+        if (!v) return
+        const p = (this.command && this.command.parameters) || [0, {}]
+        this.vehicle = p[0] || 0
+        const a = p[1] || {}
+        this.audio = { name: a.name || '', volume: a.volume ?? 90, pitch: a.pitch ?? 100, pan: a.pan ?? 0 }
+      },
+    },
   },
   methods: {
-    ok() {
+    onConfirm(a) {
       this.$emit('confirm', [{
         code: 140,
         indent: (this.command && this.command.indent) || 0,
-        parameters: [this.vehicle, { ...this.audio }],
+        parameters: [this.vehicle, { name: a.name || '', volume: a.volume, pitch: a.pitch, pan: a.pan }],
       }])
-      this.$emit('update:modelValue', false)
     },
   },
 }

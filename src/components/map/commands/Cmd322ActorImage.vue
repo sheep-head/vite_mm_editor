@@ -5,27 +5,54 @@
         <el-input-number v-model="actorId" :min="1" controls-position="right" />
         <el-button size="small" @click="pickerVisible = true">...</el-button>
       </el-form-item>
-      <el-form-item label="行走图"><el-input v-model="charName" placeholder="characters 文件名" /></el-form-item>
-      <el-form-item label="行走索引"><el-input-number v-model="charIndex" :min="0" :max="7" controls-position="right" /></el-form-item>
-      <el-form-item label="脸图"><el-input v-model="faceName" placeholder="faces 文件名" /></el-form-item>
-      <el-form-item label="脸图索引"><el-input-number v-model="faceIndex" :min="0" :max="7" controls-position="right" /></el-form-item>
+      <el-form-item label="行走图">
+        <el-input v-model="charName" placeholder="characters" style="width: 140px" />
+        <el-input-number v-model="charIndex" :min="0" :max="7" controls-position="right" />
+        <el-button size="small" @click="charPickerVisible = true">选择…</el-button>
+      </el-form-item>
+      <el-form-item label="脸图">
+        <el-input v-model="faceName" placeholder="faces" style="width: 140px" />
+        <el-input-number v-model="faceIndex" :min="0" :max="7" controls-position="right" />
+        <el-button size="small" @click="facePickerVisible = true">选择…</el-button>
+      </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
       <el-button type="primary" @click="ok">确定</el-button>
     </template>
     <id-name-picker-dialog v-model="pickerVisible" type="actor" :model-id="actorId" @confirm="(id) => (actorId = id)" />
+    <character-sheet-picker-dialog
+      v-model="charPickerVisible"
+      :model-name="charName"
+      :model-index="charIndex"
+      @confirm="(p) => { charName = p.name; charIndex = p.index }" />
+    <face-sheet-picker-dialog
+      v-model="facePickerVisible"
+      :model-name="faceName"
+      :model-index="faceIndex"
+      @confirm="(p) => { faceName = p.name; faceIndex = p.index }" />
   </el-dialog>
 </template>
 <script>
 import IdNamePickerDialog from '../pickers/IdNamePickerDialog.vue'
+import CharacterSheetPickerDialog from '../pickers/CharacterSheetPickerDialog.vue'
+import FaceSheetPickerDialog from '../pickers/FaceSheetPickerDialog.vue'
 export default {
   name: 'Cmd322ActorImage',
-  components: { IdNamePickerDialog },
+  components: { IdNamePickerDialog, CharacterSheetPickerDialog, FaceSheetPickerDialog },
   props: { modelValue: Boolean, command: Object },
   emits: ['update:modelValue', 'confirm'],
   data() {
-    return { actorId: 1, charName: '', charIndex: 0, faceName: '', faceIndex: 0, pickerVisible: false }
+    return {
+      actorId: 1,
+      charName: '',
+      charIndex: 0,
+      faceName: '',
+      faceIndex: 0,
+      pickerVisible: false,
+      charPickerVisible: false,
+      facePickerVisible: false,
+    }
   },
   watch: {
     modelValue: {
