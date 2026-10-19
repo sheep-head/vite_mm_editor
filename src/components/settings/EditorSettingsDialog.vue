@@ -95,6 +95,12 @@
             </div>
             <p class="set-hint">勾选后无法从列表打开，适合超大或仅作占位的地图。</p>
           </el-form-item>
+          <el-form-item label="异步加载地图">
+            <el-switch v-model="ui.asyncMapLoad" disabled />
+            <p class="set-hint">
+              已停用。主地图改为视口缓冲 + 地图数据非响应式，避免整图缓存和响应式追踪导致卡顿崩溃。
+            </p>
+          </el-form-item>
           <el-form-item label="地图外背景皮肤">
             <div class="set-row">
               <span class="set-summary">{{ ui.mapBgSkin || '（无）' }}</span>

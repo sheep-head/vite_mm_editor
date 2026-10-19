@@ -5,7 +5,7 @@
     width="720px"
     append-to-body
     destroy-on-close
-    @update:model-value="$emit('update:modelValue', $event)">
+    @update:model-value="onVisible">
     <el-form size="small" label-width="72px" @submit.prevent>
       <el-form-item label="查找类型">
         <el-radio-group v-model="searchType">
@@ -15,7 +15,14 @@
         </el-radio-group>
       </el-form-item>
       <el-form-item v-if="searchType === 'name'" label="名称">
-        <el-input v-model="nameQuery" placeholder="支持包含匹配" clearable @keyup.enter="runSearch" />
+        <div class="es-name-row">
+          <el-input
+            v-model="nameQuery"
+            :placeholder="useRegex ? '正则表达式' : '支持包含匹配'"
+            clearable
+            @keyup.enter="runSearch" />
+          <el-checkbox v-model="useRegex">正则匹配</el-checkbox>
+        </div>
       </el-form-item>
       <el-form-item v-else-if="searchType === 'switch'" label="开关">
         <id-name-field v-model="switchId" type="switch" width="240px" />
@@ -24,7 +31,9 @@
         <id-name-field v-model="variableId" type="variable" width="240px" />
       </el-form-item>
       <el-form-item>
-        <el-button type="primary" :loading="searching" @click="runSearch">查找</el-button>
+        <el-button type="primary" :loading="searching" :disabled="!canSearch" @click="runSearch">
+          查找
+        </el-button>
         <span class="es-hint">结果 {{ results.length }} 条</span>
       </el-form-item>
     </el-form>
@@ -49,9 +58,23 @@
 
 <script>
 import { mapGetters } from 'vuex'
+import { ElMessage } from 'element-plus'
 import IdNameField from '@/components/database/shared/IdNameField.vue'
 import DataManager from '@/utils/DataManager'
 import { fs, path, isNw } from '@/utils/nw'
+
+function frameYield() {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()))
+}
+
+function readFileAsync(file) {
+  return new Promise((resolve, reject) => {
+    fs.readFile(file, 'utf8', (err, data) => {
+      if (err) reject(err)
+      else resolve(data)
+    })
+  })
+}
 
 export default {
   name: 'EventSearcherDialog',
@@ -64,10 +87,12 @@ export default {
     return {
       searchType: 'name',
       nameQuery: '',
+      useRegex: false,
       switchId: 1,
       variableId: 1,
       searching: false,
       results: [],
+      _token: 0,
     }
   },
   computed: {
@@ -79,8 +104,23 @@ export default {
         return ''
       }
     },
+    canSearch() {
+      if (this.searchType === 'name') return !!(this.nameQuery || '').trim()
+      return true
+    },
+  },
+  beforeUnmount() {
+    this.cancelSearch()
   },
   methods: {
+    onVisible(v) {
+      if (!v) this.cancelSearch()
+      this.$emit('update:modelValue', v)
+    },
+    cancelSearch() {
+      this._token += 1
+      this.searching = false
+    },
     mapNameOf(id) {
       const list = this.mapInfos
       if (!Array.isArray(list)) return ''
@@ -142,35 +182,61 @@ export default {
       }
       return null
     },
-    runSearch() {
+    matchName(ev, q, regex) {
+      const nm = String(ev.name || '')
+      if (regex) {
+        try {
+          if (regex.test(nm)) return '名称正则'
+        } catch (e) {
+          return null
+        }
+        return null
+      }
+      if (nm.toLowerCase().includes(q)) return '名称包含'
+      return null
+    },
+    async runSearch() {
+      if (!this.canSearch) return
+      let regex = null
+      const q = (this.nameQuery || '').trim()
+      if (this.searchType === 'name' && this.useRegex) {
+        try {
+          regex = new RegExp(q)
+        } catch (e) {
+          ElMessage.error('正则表达式无效')
+          return
+        }
+      }
+      const token = ++this._token
       this.searching = true
       this.results = []
+      const files = this.listMapFiles()
+      const nameQ = q.toLowerCase()
       try {
-        const files = this.listMapFiles()
-        const out = []
-        const q = (this.nameQuery || '').trim().toLowerCase()
         for (const { id: mapId, file } of files) {
+          if (token !== this._token) return
+          let text
+          try {
+            text = await readFileAsync(file)
+          } catch (e) {
+            continue
+          }
+          if (token !== this._token) return
           let data
           try {
-            data = JSON.parse(fs.readFileSync(file, 'utf8'))
+            data = JSON.parse(text)
           } catch (e) {
             continue
           }
           const mapName = this.mapNameOf(mapId) || data.displayName || ''
           for (const ev of data.events || []) {
-            if (!ev) continue
+            if (!ev || token !== this._token) continue
             let reason = null
-            if (this.searchType === 'name') {
-              if (!q) continue
-              const nm = String(ev.name || '').toLowerCase()
-              if (nm.includes(q)) reason = '名称包含'
-            } else if (this.searchType === 'switch') {
-              reason = this.matchSwitch(ev, this.switchId)
-            } else {
-              reason = this.matchVariable(ev, this.variableId)
-            }
+            if (this.searchType === 'name') reason = this.matchName(ev, nameQ, regex)
+            else if (this.searchType === 'switch') reason = this.matchSwitch(ev, this.switchId)
+            else reason = this.matchVariable(ev, this.variableId)
             if (!reason) continue
-            out.push({
+            this.results.push({
               mapId,
               mapName,
               eventId: ev.id,
@@ -179,11 +245,12 @@ export default {
               y: ev.y,
               reason,
             })
+            await frameYield()
+            if (token !== this._token) return
           }
         }
-        this.results = out
       } finally {
-        this.searching = false
+        if (token === this._token) this.searching = false
       }
     },
     locate(row) {
@@ -201,7 +268,16 @@ export default {
 <style scoped>
 .es-hint {
   margin-left: 12px;
-  font-size: 12px;
   color: var(--app-text-muted);
+  font-size: 12px;
+}
+.es-name-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.es-name-row .el-input {
+  flex: 1;
 }
 </style>

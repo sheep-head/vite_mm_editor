@@ -2,7 +2,7 @@
   <el-dialog
     :model-value="modelValue"
     :title="dialogTitle"
-    width="1180px"
+    width="1280px"
     :before-close="onBeforeClose"
     top="4vh"
     append-to-body
@@ -54,137 +54,140 @@
       </div>
 
       <div v-if="currentPage" class="ev-main">
-        <aside class="ev-left">
+        <aside class="ev-left" :class="{ 'is-readonly': isRefMode }">
           <fieldset class="ev-box">
             <legend>出现条件</legend>
-            <el-form size="small" label-width="0" :disabled="isRefMode" class="ev-cond">
+            <div class="ev-cond">
               <div class="ev-cond-row">
-                <el-checkbox v-model="currentPage.conditions.switch1Valid">开关</el-checkbox>
+                <el-checkbox v-model="currentPage.conditions.switch1Valid" :disabled="isRefMode">开关</el-checkbox>
                 <id-name-field
                   v-model="currentPage.conditions.switch1Id"
                   type="switch"
-                  width="160px"
-                  :disabled="!currentPage.conditions.switch1Valid" />
+                  width="180px"
+                  :disabled="isRefMode || !currentPage.conditions.switch1Valid" />
               </div>
               <div class="ev-cond-row">
-                <el-checkbox v-model="currentPage.conditions.switch2Valid">开关</el-checkbox>
+                <el-checkbox v-model="currentPage.conditions.switch2Valid" :disabled="isRefMode">开关</el-checkbox>
                 <id-name-field
                   v-model="currentPage.conditions.switch2Id"
                   type="switch"
-                  width="160px"
-                  :disabled="!currentPage.conditions.switch2Valid" />
+                  width="180px"
+                  :disabled="isRefMode || !currentPage.conditions.switch2Valid" />
               </div>
               <div class="ev-cond-row">
-                <el-checkbox v-model="currentPage.conditions.variableValid">变量</el-checkbox>
+                <el-checkbox v-model="currentPage.conditions.variableValid" :disabled="isRefMode">变量</el-checkbox>
                 <id-name-field
                   v-model="currentPage.conditions.variableId"
                   type="variable"
-                  width="160px"
-                  :disabled="!currentPage.conditions.variableValid" />
+                  width="180px"
+                  :disabled="isRefMode || !currentPage.conditions.variableValid" />
+              </div>
+              <div class="ev-cond-sub">
                 <span>≥</span>
                 <el-input-number
                   v-model="currentPage.conditions.variableValue"
-                  :disabled="!currentPage.conditions.variableValid"
+                  :disabled="isRefMode || !currentPage.conditions.variableValid"
                   controls-position="right"
                   size="small" />
               </div>
               <div class="ev-cond-row">
-                <el-checkbox v-model="currentPage.conditions.selfSwitchValid">独立开关</el-checkbox>
+                <el-checkbox v-model="currentPage.conditions.selfSwitchValid" :disabled="isRefMode">独立开关</el-checkbox>
                 <el-select
                   v-model="currentPage.conditions.selfSwitchCh"
-                  :disabled="!currentPage.conditions.selfSwitchValid"
+                  :disabled="isRefMode || !currentPage.conditions.selfSwitchValid"
+                  size="small"
                   style="width: 72px">
                   <el-option v-for="ch in ['A', 'B', 'C', 'D']" :key="ch" :label="ch" :value="ch" />
                 </el-select>
               </div>
               <div class="ev-cond-row">
-                <el-checkbox v-model="currentPage.conditions.itemValid">物品</el-checkbox>
-                <el-input-number
+                <el-checkbox v-model="currentPage.conditions.itemValid" :disabled="isRefMode">物品</el-checkbox>
+                <id-name-field
                   v-model="currentPage.conditions.itemId"
-                  :min="1"
-                  :disabled="!currentPage.conditions.itemValid"
-                  controls-position="right"
-                  size="small" />
-                <el-button
-                  size="small"
-                  :disabled="!currentPage.conditions.itemValid"
-                  @click="openPicker('item', 'itemId')">
-                  ...
-                </el-button>
+                  type="item"
+                  width="180px"
+                  :allow-none="false"
+                  :disabled="isRefMode || !currentPage.conditions.itemValid" />
               </div>
               <div class="ev-cond-row">
-                <el-checkbox v-model="currentPage.conditions.actorValid">角色</el-checkbox>
-                <el-input-number
+                <el-checkbox v-model="currentPage.conditions.actorValid" :disabled="isRefMode">角色</el-checkbox>
+                <id-name-field
                   v-model="currentPage.conditions.actorId"
-                  :min="1"
-                  :disabled="!currentPage.conditions.actorValid"
-                  controls-position="right"
-                  size="small" />
-                <el-button
-                  size="small"
-                  :disabled="!currentPage.conditions.actorValid"
-                  @click="openPicker('actor', 'actorId')">
-                  ...
-                </el-button>
+                  type="actor"
+                  width="180px"
+                  :allow-none="false"
+                  :disabled="isRefMode || !currentPage.conditions.actorValid" />
               </div>
-            </el-form>
-          </fieldset>
-
-          <fieldset class="ev-box ev-image-box">
-            <legend>图像</legend>
-            <div class="ev-char-preview" title="点击编辑图像" @click="!isRefMode && openCharacterPicker()">
-              <canvas ref="charCanvas" width="96" height="96" />
             </div>
           </fieldset>
 
-          <fieldset class="ev-box">
-            <legend>自主移动</legend>
-            <el-form size="small" label-width="72px" :disabled="isRefMode">
-              <el-form-item label="类型">
-                <el-select v-model="currentPage.moveType" style="width: 120px">
-                  <el-option v-for="o in moveTypeOptions" :key="o.value" :label="o.label" :value="o.value" />
-                </el-select>
-                <el-button
+          <div class="ev-left-mid">
+            <fieldset class="ev-box ev-image-box">
+              <legend>图像</legend>
+              <div class="ev-char-preview" title="点击编辑图像" @click="!isRefMode && openCharacterPicker()">
+                <canvas ref="charCanvas" width="96" height="96" />
+              </div>
+            </fieldset>
+            <fieldset class="ev-box">
+              <legend>自主移动</legend>
+              <el-form size="small" label-width="72px" :disabled="isRefMode" class="ev-move-form">
+                <el-form-item label="类型">
+                  <div class="ev-move-type">
+                    <el-select v-model="currentPage.moveType" style="flex: 1">
+                      <el-option v-for="o in moveTypeOptions" :key="o.value" :label="o.label" :value="o.value" />
+                    </el-select>
+                    <el-button size="small" :disabled="currentPage.moveType !== 3" @click="openMoveRoute">
+                      路线...
+                    </el-button>
+                  </div>
+                </el-form-item>
+                <el-form-item label="移动速度">
+                  <el-select v-model="currentPage.moveSpeed" style="width: 100%">
+                    <el-option v-for="o in moveSpeedOptions" :key="o.value" :label="o.label" :value="o.value" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="移动频率">
+                  <el-select v-model="currentPage.moveFrequency" style="width: 100%">
+                    <el-option v-for="o in moveFreqOptions" :key="o.value" :label="o.label" :value="o.value" />
+                  </el-select>
+                </el-form-item>
+              </el-form>
+            </fieldset>
+          </div>
+
+          <div class="ev-left-bot">
+            <fieldset class="ev-box">
+              <legend>选项</legend>
+              <div class="ev-opts">
+                <el-checkbox v-model="currentPage.walkAnime" :disabled="isRefMode">步行动画</el-checkbox>
+                <el-checkbox v-model="currentPage.stepAnime" :disabled="isRefMode">踏步动画</el-checkbox>
+                <el-checkbox v-model="currentPage.directionFix" :disabled="isRefMode">固定朝向</el-checkbox>
+                <el-checkbox v-model="currentPage.through" :disabled="isRefMode">穿透</el-checkbox>
+              </div>
+            </fieldset>
+            <div class="ev-pri-stack">
+              <fieldset class="ev-box">
+                <legend>优先级</legend>
+                <el-select
+                  v-model="currentPage.priorityType"
                   size="small"
-                  :disabled="currentPage.moveType !== 3"
-                  class="ml"
-                  @click="openMoveRoute">
-                  路线...
-                </el-button>
-              </el-form-item>
-              <el-form-item label="移动速度">
-                <el-select v-model="currentPage.moveSpeed" style="width: 140px">
-                  <el-option v-for="o in moveSpeedOptions" :key="o.value" :label="o.label" :value="o.value" />
+                  :disabled="isRefMode"
+                  style="width: 100%">
+                  <el-option v-for="o in priorityOptions" :key="o.value" :label="o.label" :value="o.value" />
                 </el-select>
-              </el-form-item>
-              <el-form-item label="移动频率">
-                <el-select v-model="currentPage.moveFrequency" style="width: 140px">
-                  <el-option v-for="o in moveFreqOptions" :key="o.value" :label="o.label" :value="o.value" />
+              </fieldset>
+              <fieldset class="ev-box">
+                <legend>触发条件</legend>
+                <el-select
+                  v-model="currentPage.trigger"
+                  size="small"
+                  :disabled="isRefMode"
+                  style="width: 100%">
+                  <el-option v-for="o in triggerOptions" :key="o.value" :label="o.label" :value="o.value" />
                 </el-select>
-              </el-form-item>
-            </el-form>
-          </fieldset>
-
-          <fieldset class="ev-box">
-            <legend>选项</legend>
-            <el-checkbox v-model="currentPage.walkAnime" :disabled="isRefMode">步行动画</el-checkbox>
-            <el-checkbox v-model="currentPage.stepAnime" :disabled="isRefMode">踏步动画</el-checkbox>
-            <el-checkbox v-model="currentPage.directionFix" :disabled="isRefMode">固定朝向</el-checkbox>
-            <el-checkbox v-model="currentPage.through" :disabled="isRefMode">穿透</el-checkbox>
-          </fieldset>
-
-          <el-form size="small" label-width="72px" :disabled="isRefMode" class="ev-pri">
-            <el-form-item label="优先级">
-              <el-select v-model="currentPage.priorityType" style="width: 140px">
-                <el-option v-for="o in priorityOptions" :key="o.value" :label="o.label" :value="o.value" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="触发条件">
-              <el-select v-model="currentPage.trigger" style="width: 140px">
-                <el-option v-for="o in triggerOptions" :key="o.value" :label="o.label" :value="o.value" />
-              </el-select>
-            </el-form-item>
-          </el-form>
+              </fieldset>
+            </div>
+          </div>
         </aside>
 
         <section class="ev-right">
@@ -207,6 +210,12 @@
       :show-target="false"
       :show-wait="false"
       :route="currentPage && currentPage.moveRoute"
+      :preview-map-id="previewMapId"
+      :start-x="event ? event.x : 0"
+      :start-y="event ? event.y : 0"
+      :character-name="currentPage && currentPage.image ? currentPage.image.characterName : ''"
+      :character-index="currentPage && currentPage.image ? currentPage.image.characterIndex : 0"
+      :start-direction="currentPage && currentPage.image ? currentPage.image.direction : 2"
       @confirm="onMoveRouteConfirm" />
 
     <id-name-picker-dialog
@@ -289,6 +298,11 @@ export default {
     refMode: { type: Object, default: null },
   },
   emits: ['update:modelValue', 'confirm', 'apply', 'jump-to-ref'],
+  provide() {
+    return {
+      editingMapEvent: () => this.event || this.draft,
+    }
+  },
   data() {
     return {
       draft: null,
@@ -333,6 +347,9 @@ export default {
       } catch (e) {
         return ''
       }
+    },
+    previewMapId() {
+      return this.$store.getters.selectedMapId || 0
     },
   },
   watch: {
@@ -625,7 +642,7 @@ export default {
   min-height: 440px;
 }
 .ev-left {
-  width: 300px;
+  width: 420px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -644,6 +661,7 @@ export default {
   padding: 6px 8px 8px;
   border: 1px solid var(--app-border);
   border-radius: 4px;
+  min-width: 0;
 }
 .ev-box legend {
   padding: 0 4px;
@@ -653,10 +671,58 @@ export default {
 }
 .ev-cond-row {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 4px;
+}
+.ev-cond-row :deep(.el-checkbox) {
+  flex: 0 0 auto;
+  margin-right: 0;
+  white-space: nowrap;
+}
+.ev-cond-row :deep(.id-name-field),
+.ev-cond-row :deep(.el-select) {
+  margin-left: auto;
+}
+.ev-cond-sub {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: -2px 0 6px;
+  padding-left: 24px;
+  font-size: 12px;
+}
+.ev-left-mid,
+.ev-left-bot {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 8px;
+  align-items: stretch;
+}
+.ev-pri-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.ev-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ev-opts :deep(.el-checkbox) {
+  margin-right: 0;
+}
+.ev-move-form :deep(.el-form-item) {
+  margin-bottom: 6px;
+}
+.ev-move-type {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  align-items: center;
 }
 .ev-char-preview {
   width: 96px;
@@ -667,11 +733,5 @@ export default {
 }
 .ev-image-box {
   text-align: center;
-}
-.ml {
-  margin-left: 6px;
-}
-.ev-pri {
-  padding: 0 4px;
 }
 </style>

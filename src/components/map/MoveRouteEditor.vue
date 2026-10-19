@@ -2,7 +2,7 @@
   <el-dialog
     :model-value="modelValue"
     title="设置移动路线"
-    width="720px"
+    width="760px"
     top="6vh"
     append-to-body
     destroy-on-close
@@ -19,18 +19,24 @@
             :value="ev.id"
             :label="`${String(ev.id).padStart(3, '0')} ${ev.name || '(无名称)'}`" />
         </el-select>
-        <div class="mr-list" tabindex="0" @keydown="onListKey">
+        <div
+          ref="listEl"
+          class="mr-list"
+          tabindex="0"
+          @keydown="onListKey"
+          @contextmenu.prevent="onContextMenu">
           <div
             v-for="(step, i) in displaySteps"
             :key="i"
             class="mr-row"
-            :class="{ active: selected === i }"
-            @click="selected = i">
+            :class="{ active: isSelected(i) }"
+            @click="onRowClick(i, $event)"
+            @dblclick="activateRow(i)">
             <span class="mr-mark">◇</span>
             <span>{{ stepLabel(step) }}</span>
           </div>
         </div>
-        <el-button size="small" disabled>预览...</el-button>
+        <el-button size="small" :disabled="!previewMapId" @click="previewVisible = true">预览...</el-button>
         <fieldset class="mr-opts">
           <legend>选项</legend>
           <el-checkbox v-model="repeat">循环执行</el-checkbox>
@@ -58,6 +64,40 @@
       <el-button type="primary" @click="ok">确定</el-button>
     </template>
 
+    <teleport to="body">
+      <ul
+        v-show="menu.visible"
+        ref="menuEl"
+        class="contextmenu mr-ctx"
+        :style="{ left: menu.x + 'px', top: menu.y + 'px' }"
+        @mousedown.stop
+        @contextmenu.prevent>
+        <li :class="{ disabled: !canEdit }" @click="menuAction(editSelected)">
+          <span>编辑...</span><span class="sc">Space</span>
+        </li>
+        <li class="sep" />
+        <li :class="{ disabled: !canCopy }" @click="menuAction(cutSelected)">
+          <span>剪切</span><span class="sc">Ctrl+X</span>
+        </li>
+        <li :class="{ disabled: !canCopy }" @click="menuAction(copySelected)">
+          <span>复制</span><span class="sc">Ctrl+C</span>
+        </li>
+        <li :class="{ disabled: !clipboard.length }" @click="menuAction(pasteClipboard)">
+          <span>粘贴</span><span class="sc">Ctrl+V</span>
+        </li>
+        <li :class="{ disabled: !canCopy }" @click="menuAction(deleteSelected)">
+          <span>删除</span><span class="sc">Del</span>
+        </li>
+        <li @click="menuAction(selectAll)">
+          <span>全选</span><span class="sc">Ctrl+A</span>
+        </li>
+        <li class="sep" />
+        <li @click="menuAction(insertBlank)">插入</li>
+        <li :class="{ disabled: !canMove(-1) }" @click="menuAction(() => moveSelected(-1))">上移</li>
+        <li :class="{ disabled: !canMove(1) }" @click="menuAction(() => moveSelected(1))">下移</li>
+      </ul>
+    </teleport>
+
     <el-dialog v-model="paramDlg" :title="paramTitle" width="360px" append-to-body :close-on-click-modal="false">
       <el-form size="small" label-width="88px">
         <el-form-item v-if="paramKind === 'jump'" label="X">
@@ -72,8 +112,15 @@
         <el-form-item v-if="paramKind === 'switch'" label="开关">
           <id-name-field v-model="paramDraft.n" type="switch" width="200px" />
         </el-form-item>
-        <el-form-item v-if="paramKind === 'speed' || paramKind === 'freq'" label="值">
-          <el-input-number v-model="paramDraft.n" :min="1" :max="6" controls-position="right" />
+        <el-form-item v-if="paramKind === 'speed'" label="移动速度">
+          <el-select v-model="paramDraft.n" style="width: 180px">
+            <el-option v-for="o in speedOptions" :key="o.value" :label="o.label" :value="o.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="paramKind === 'freq'" label="移动频率">
+          <el-select v-model="paramDraft.n" style="width: 180px">
+            <el-option v-for="o in freqOptions" :key="o.value" :label="o.label" :value="o.value" />
+          </el-select>
         </el-form-item>
         <el-form-item v-if="paramKind === 'opacity'" label="不透明度">
           <el-input-number v-model="paramDraft.n" :min="0" :max="255" controls-position="right" />
@@ -86,15 +133,6 @@
             <el-option :value="3" label="屏幕" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="paramKind === 'image'" label="图像">
-          <el-input v-model="paramDraft.name" placeholder="文件名" />
-        </el-form-item>
-        <el-form-item v-if="paramKind === 'image'" label="索引">
-          <el-input-number v-model="paramDraft.index" :min="0" :max="7" controls-position="right" />
-        </el-form-item>
-        <el-form-item v-if="paramKind === 'se'" label="SE">
-          <el-input v-model="paramDraft.name" placeholder="文件名" />
-        </el-form-item>
         <el-form-item v-if="paramKind === 'script'" label="脚本">
           <el-input v-model="paramDraft.text" type="textarea" :rows="3" />
         </el-form-item>
@@ -104,11 +142,42 @@
         <el-button type="primary" @click="confirmParam">确定</el-button>
       </template>
     </el-dialog>
+
+    <character-sheet-picker-dialog
+      v-model="imageDlg"
+      :model-name="imageDraft.name"
+      :model-index="imageDraft.index"
+      @confirm="onImageConfirm" />
+
+    <audio-file-picker-dialog
+      v-model="seDlg"
+      folder="se"
+      dialog-title="播放 SE"
+      :model-name="seDraft.name"
+      :model-volume="seDraft.volume"
+      :model-pitch="seDraft.pitch"
+      :model-pan="seDraft.pan"
+      @confirm="onSeConfirm" />
+
+    <move-route-preview-dialog
+      v-model="previewVisible"
+      :map-id="previewMapId"
+      :start-x="resolvedStart.x"
+      :start-y="resolvedStart.y"
+      :character-name="resolvedStart.characterName"
+      :character-index="resolvedStart.characterIndex"
+      :direction="resolvedStart.direction"
+      :route="previewRoute" />
   </el-dialog>
 </template>
 
 <script>
 import IdNameField from '@/components/database/shared/IdNameField.vue'
+import CharacterSheetPickerDialog from '@/components/map/pickers/CharacterSheetPickerDialog.vue'
+import AudioFilePickerDialog from '@/components/map/pickers/AudioFilePickerDialog.vue'
+import MoveRoutePreviewDialog from '@/components/map/MoveRoutePreviewDialog.vue'
+import { loadSystem } from '@/components/database/shared/systemLookups'
+import { MOVE_SPEED_OPTIONS, MOVE_FREQ_OPTIONS } from './eventDefaults'
 
 const BUTTONS = [
   [
@@ -165,21 +234,52 @@ const BUTTONS = [
 ]
 
 const LABELS = {}
+const KIND_BY_CODE = {}
 BUTTONS.flat().forEach((b) => {
   LABELS[b.code] = b.label.replace(/\.\.\.$/, '')
+  if (b.kind) KIND_BY_CODE[b.code] = b.kind
 })
+
+let routeClipboard = []
+
+function cloneSteps(list) {
+  return (list || []).map((s) => ({
+    code: s.code,
+    parameters: Array.isArray(s.parameters) ? JSON.parse(JSON.stringify(s.parameters)) : [],
+  }))
+}
+
+function switchLabel(id) {
+  const n = Number(id) || 0
+  const arr = (loadSystem().switches) || []
+  const name = arr[n] || ''
+  const pad = `#${String(n).padStart(4, '0')}`
+  return name ? `${pad} ${name}` : pad
+}
 
 export default {
   name: 'MoveRouteEditor',
-  components: { IdNameField },
+  components: {
+    IdNameField,
+    CharacterSheetPickerDialog,
+    AudioFilePickerDialog,
+    MoveRoutePreviewDialog,
+  },
   props: {
     modelValue: { type: Boolean, default: false },
-    /** 自主移动不显示目标；指令 205 显示 */
     showTarget: { type: Boolean, default: false },
     showWait: { type: Boolean, default: true },
     characterId: { type: Number, default: 0 },
     route: { type: Object, default: null },
     mapEvents: { type: Array, default: () => [] },
+    previewMapId: { type: Number, default: 0 },
+    startX: { type: Number, default: 0 },
+    startY: { type: Number, default: 0 },
+    characterName: { type: String, default: '' },
+    characterIndex: { type: Number, default: 0 },
+    startDirection: { type: Number, default: 2 },
+    /** 205 用：按目标解析后的起点，优先于上面的 start* */
+    previewStarts: { type: Object, default: null },
   },
   emits: ['update:modelValue', 'confirm'],
   data() {
@@ -189,25 +289,72 @@ export default {
       skippable: false,
       wait: true,
       steps: [],
-      selected: 0,
+      selected: [0],
+      anchor: 0,
       buttonCols: BUTTONS,
+      speedOptions: MOVE_SPEED_OPTIONS,
+      freqOptions: MOVE_FREQ_OPTIONS,
+      clipboard: routeClipboard,
+      menu: { visible: false, x: 0, y: 0 },
       paramDlg: false,
       paramKind: '',
       paramTitle: '',
       paramCode: 0,
+      paramEditIndex: -1,
       paramDraft: { x: 0, y: 0, n: 1, name: '', index: 0, text: '' },
+      imageDlg: false,
+      imageDraft: { name: '', index: 0 },
+      imageEditIndex: -1,
+      seDlg: false,
+      seDraft: { name: '', volume: 90, pitch: 100, pan: 0 },
+      seEditIndex: -1,
+      previewVisible: false,
     }
   },
   computed: {
     displaySteps() {
       return [...this.steps, { code: 0, parameters: [] }]
     },
+    focusIndex() {
+      return this.selected.length ? this.selected[this.selected.length - 1] : 0
+    },
+    canCopy() {
+      return this.selected.some((i) => i >= 0 && i < this.steps.length)
+    },
+    canEdit() {
+      const i = this.focusIndex
+      return i >= 0 && i < this.steps.length && !!KIND_BY_CODE[this.steps[i].code]
+    },
+    previewRoute() {
+      return {
+        list: this.steps.map((s) => ({ code: s.code, parameters: s.parameters || [] })),
+        repeat: this.repeat,
+        skippable: this.skippable,
+        wait: this.wait,
+      }
+    },
+    resolvedStart() {
+      const tid = this.showTarget ? this.targetId : 0
+      if (this.previewStarts && this.previewStarts[tid]) {
+        return this.previewStarts[tid]
+      }
+      return {
+        x: this.startX || 0,
+        y: this.startY || 0,
+        characterName: this.characterName || '',
+        characterIndex: this.characterIndex || 0,
+        direction: this.startDirection || 2,
+      }
+    },
   },
   watch: {
     modelValue: {
       immediate: true,
       handler(v) {
-        if (!v) return
+        if (!v) {
+          this.closeMenu()
+          return
+        }
         this.targetId = this.characterId != null ? this.characterId : 0
         const r = this.route || {}
         this.repeat = !!r.repeat
@@ -218,73 +365,351 @@ export default {
           code: s.code,
           parameters: Array.isArray(s.parameters) ? [...s.parameters] : [],
         }))
-        this.selected = 0
+        this.selected = [0]
+        this.anchor = 0
+        this.clipboard = routeClipboard
       },
     },
   },
+  created() {
+    this._onMenuAway = () => this.closeMenu()
+  },
+  beforeUnmount() {
+    this.closeMenu()
+  },
   methods: {
+    isSelected(i) {
+      return this.selected.includes(i)
+    },
+    canMove(dir) {
+      if (!this.canCopy) return false
+      const idxs = this.selected.filter((i) => i < this.steps.length).sort((a, b) => a - b)
+      if (!idxs.length) return false
+      if (dir < 0) return idxs[0] > 0
+      return idxs[idxs.length - 1] < this.steps.length - 1
+    },
     stepLabel(step) {
       if (!step || step.code === 0) return ''
       const base = LABELS[step.code] || `指令#${step.code}`
       const p = step.parameters || []
       if (step.code === 14) return `${base}(${p[0] || 0},${p[1] || 0})`
       if (step.code === 15) return `${base}(${p[0] || 0}帧)`
-      if (step.code === 27 || step.code === 28) return `${base}#${p[0] || 1}`
-      if (step.code === 29 || step.code === 30) return `${base}${p[0] || 4}`
-      if (step.code === 41) return `${base}${p[0] || ''}(${p[1] || 0})`
+      if (step.code === 27 || step.code === 28) return `${base} ${switchLabel(p[0])}`
+      if (step.code === 29) {
+        const o = MOVE_SPEED_OPTIONS.find((x) => x.value === p[0])
+        return `${base} ${o ? o.label : p[0] || 4}`
+      }
+      if (step.code === 30) {
+        const o = MOVE_FREQ_OPTIONS.find((x) => x.value === p[0])
+        return `${base} ${o ? o.label : p[0] || 3}`
+      }
+      if (step.code === 41) return `${base} ${p[0] || ''}(${p[1] || 0})`
       if (step.code === 42) return `${base}${p[0] || 255}`
       if (step.code === 43) return `${base}${p[0] || 0}`
-      if (step.code === 44) return `${base}${p[0] && p[0].name ? p[0].name : ''}`
+      if (step.code === 44) return `${base} ${p[0] && p[0].name ? p[0].name : ''}`
       if (step.code === 45) return `${base}${p[0] || ''}`
       return base
     },
+    onRowClick(i, e) {
+      if (e.shiftKey) {
+        const a = this.anchor
+        const lo = Math.min(a, i)
+        const hi = Math.max(a, i)
+        const next = []
+        for (let n = lo; n <= hi; n++) next.push(n)
+        this.selected = next
+      } else {
+        this.selected = [i]
+        this.anchor = i
+      }
+      if (this.$refs.listEl) this.$refs.listEl.focus()
+    },
+    activateRow(i) {
+      this.selected = [i]
+      this.anchor = i
+      if (i >= this.steps.length) return
+      this.editSelected()
+    },
     addCommand(b) {
+      if (b.kind === 'image') {
+        this.imageEditIndex = -1
+        this.imageDraft = { name: '', index: 0 }
+        this.imageDlg = true
+        return
+      }
+      if (b.kind === 'se') {
+        this.seEditIndex = -1
+        this.seDraft = { name: '', volume: 90, pitch: 100, pan: 0 }
+        this.seDlg = true
+        return
+      }
       if (b.kind) {
-        this.paramKind = b.kind
-        this.paramCode = b.code
-        this.paramTitle = b.label
-        this.paramDraft = {
-          x: 0,
-          y: 0,
-          n: b.kind === 'wait' ? 60 : b.kind === 'opacity' ? 255 : b.kind === 'speed' || b.kind === 'freq' ? 4 : 1,
-          name: '',
-          index: 0,
-          text: '',
-        }
-        this.paramDlg = true
+        this.openParam(b.code, b.kind, b.label, -1)
         return
       }
       this.insertStep({ code: b.code, parameters: [] })
+    },
+    openParam(code, kind, title, editIndex) {
+      const step = editIndex >= 0 ? this.steps[editIndex] : null
+      const p = (step && step.parameters) || []
+      this.paramKind = kind
+      this.paramCode = code
+      this.paramTitle = title || LABELS[code] || '编辑'
+      this.paramEditIndex = editIndex
+      this.paramDraft = {
+        x: kind === 'jump' ? (p[0] || 0) : 0,
+        y: kind === 'jump' ? (p[1] || 0) : 0,
+        n:
+          kind === 'wait'
+            ? (p[0] || 60)
+            : kind === 'opacity'
+              ? (p[0] ?? 255)
+              : kind === 'speed'
+                ? (p[0] || 4)
+                : kind === 'freq'
+                  ? (p[0] || 3)
+                  : kind === 'blend'
+                    ? (p[0] || 0)
+                    : kind === 'switch'
+                      ? (p[0] || 1)
+                      : 1,
+        name: '',
+        index: 0,
+        text: kind === 'script' ? (p[0] || '') : '',
+      }
+      this.paramDlg = true
     },
     confirmParam() {
       const d = this.paramDraft
       let parameters = []
       if (this.paramKind === 'jump') parameters = [d.x, d.y]
-      else if (this.paramKind === 'wait' || this.paramKind === 'switch' || this.paramKind === 'speed' || this.paramKind === 'freq' || this.paramKind === 'opacity' || this.paramKind === 'blend') {
+      else if (
+        this.paramKind === 'wait' ||
+        this.paramKind === 'switch' ||
+        this.paramKind === 'speed' ||
+        this.paramKind === 'freq' ||
+        this.paramKind === 'opacity' ||
+        this.paramKind === 'blend'
+      ) {
         parameters = [d.n]
-      } else if (this.paramKind === 'image') {
-        parameters = [d.name || '', d.index || 0, 2, 0]
-      } else if (this.paramKind === 'se') {
-        parameters = [{ name: d.name || '', volume: 90, pitch: 100, pan: 0 }]
       } else if (this.paramKind === 'script') {
         parameters = [d.text || '']
       }
-      this.insertStep({ code: this.paramCode, parameters })
+      const step = { code: this.paramCode, parameters }
+      if (this.paramEditIndex >= 0) {
+        this.steps.splice(this.paramEditIndex, 1, step)
+        this.selected = [this.paramEditIndex]
+      } else {
+        this.insertStep(step)
+      }
       this.paramDlg = false
     },
+    onImageConfirm(payload) {
+      const step = {
+        code: 41,
+        parameters: [payload.name || '', payload.index || 0, 2, 0],
+      }
+      if (this.imageEditIndex >= 0) {
+        this.steps.splice(this.imageEditIndex, 1, step)
+        this.selected = [this.imageEditIndex]
+      } else {
+        this.insertStep(step)
+      }
+    },
+    onSeConfirm(a) {
+      const step = {
+        code: 44,
+        parameters: [{ name: a.name || '', volume: a.volume, pitch: a.pitch, pan: a.pan }],
+      }
+      if (this.seEditIndex >= 0) {
+        this.steps.splice(this.seEditIndex, 1, step)
+        this.selected = [this.seEditIndex]
+      } else {
+        this.insertStep(step)
+      }
+    },
     insertStep(step) {
-      const i = Math.max(0, Math.min(this.selected, this.steps.length))
+      const i = Math.max(0, Math.min(this.focusIndex, this.steps.length))
       this.steps.splice(i, 0, step)
-      this.selected = i + 1
+      this.selected = [i + 1]
+      this.anchor = i + 1
+    },
+    editSelected() {
+      const i = this.focusIndex
+      if (i < 0 || i >= this.steps.length) return
+      const step = this.steps[i]
+      const kind = KIND_BY_CODE[step.code]
+      if (!kind) return
+      if (kind === 'image') {
+        this.imageEditIndex = i
+        this.imageDraft = {
+          name: (step.parameters && step.parameters[0]) || '',
+          index: (step.parameters && step.parameters[1]) || 0,
+        }
+        this.imageDlg = true
+        return
+      }
+      if (kind === 'se') {
+        const a = (step.parameters && step.parameters[0]) || {}
+        this.seEditIndex = i
+        this.seDraft = {
+          name: a.name || '',
+          volume: a.volume ?? 90,
+          pitch: a.pitch ?? 100,
+          pan: a.pan ?? 0,
+        }
+        this.seDlg = true
+        return
+      }
+      this.openParam(step.code, kind, LABELS[step.code], i)
+    },
+    copySelected() {
+      const idxs = this.selected.filter((i) => i < this.steps.length).sort((a, b) => a - b)
+      if (!idxs.length) return
+      routeClipboard = cloneSteps(idxs.map((i) => this.steps[i]))
+      this.clipboard = routeClipboard
+    },
+    cutSelected() {
+      this.copySelected()
+      this.deleteSelected()
+    },
+    pasteClipboard() {
+      if (!routeClipboard.length) return
+      const at = Math.min(this.focusIndex, this.steps.length)
+      const rows = cloneSteps(routeClipboard)
+      this.steps.splice(at, 0, ...rows)
+      this.selected = rows.map((_, n) => at + n)
+      this.anchor = this.selected[0]
+    },
+    deleteSelected() {
+      const idxs = this.selected.filter((i) => i < this.steps.length).sort((a, b) => b - a)
+      if (!idxs.length) return
+      idxs.forEach((i) => this.steps.splice(i, 1))
+      const next = Math.min(idxs[idxs.length - 1], this.steps.length)
+      this.selected = [next]
+      this.anchor = next
+    },
+    selectAll() {
+      if (!this.steps.length) {
+        this.selected = [0]
+        return
+      }
+      this.selected = this.steps.map((_, i) => i)
+      this.anchor = 0
+    },
+    insertBlank() {
+      this.selected = [Math.min(this.focusIndex, this.steps.length)]
+      this.anchor = this.selected[0]
+    },
+    moveSelected(dir) {
+      if (!this.canMove(dir)) return
+      const idxs = this.selected.filter((i) => i < this.steps.length).sort((a, b) => a - b)
+      if (dir < 0) {
+        const first = idxs[0]
+        const item = this.steps.splice(first - 1, 1)[0]
+        this.steps.splice(idxs[idxs.length - 1], 0, item)
+        this.selected = idxs.map((i) => i - 1)
+      } else {
+        const last = idxs[idxs.length - 1]
+        const item = this.steps.splice(last + 1, 1)[0]
+        this.steps.splice(idxs[0], 0, item)
+        this.selected = idxs.map((i) => i + 1)
+      }
+      this.anchor = this.selected[0]
     },
     onListKey(e) {
+      const max = this.steps.length
+      const ctrl = e.ctrlKey || e.metaKey
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault()
+        const delta = e.key === 'ArrowUp' ? -1 : 1
+        const cur = this.focusIndex
+        const next = Math.max(0, Math.min(max, cur + delta))
+        if (e.shiftKey) {
+          const a = this.anchor
+          const lo = Math.min(a, next)
+          const hi = Math.max(a, next)
+          const sel = []
+          for (let n = lo; n <= hi; n++) sel.push(n)
+          this.selected = sel
+        } else {
+          this.selected = [next]
+          this.anchor = next
+        }
+        this.scrollRow(next)
+        return
+      }
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault()
+        this.activateRow(this.focusIndex)
+        return
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
-        if (this.selected >= 0 && this.selected < this.steps.length) {
-          this.steps.splice(this.selected, 1)
-          this.selected = Math.min(this.selected, this.steps.length)
+        this.deleteSelected()
+        return
+      }
+      if (ctrl && (e.key === 'a' || e.key === 'A')) {
+        e.preventDefault()
+        this.selectAll()
+        return
+      }
+      if (ctrl && (e.key === 'c' || e.key === 'C')) {
+        e.preventDefault()
+        this.copySelected()
+        return
+      }
+      if (ctrl && (e.key === 'x' || e.key === 'X')) {
+        e.preventDefault()
+        this.cutSelected()
+        return
+      }
+      if (ctrl && (e.key === 'v' || e.key === 'V')) {
+        e.preventDefault()
+        this.pasteClipboard()
+      }
+    },
+    scrollRow(i) {
+      this.$nextTick(() => {
+        const root = this.$refs.listEl
+        const row = root && root.children[i]
+        if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' })
+      })
+    },
+    onContextMenu(e) {
+      const row = e.target && e.target.closest ? e.target.closest('.mr-row') : null
+      if (row && this.$refs.listEl) {
+        const i = Array.prototype.indexOf.call(this.$refs.listEl.children, row)
+        if (i >= 0 && !this.selected.includes(i)) {
+          this.selected = [i]
+          this.anchor = i
         }
       }
+      this.menu = { visible: true, x: e.clientX, y: e.clientY }
+      this.$nextTick(() => {
+        const el = this.$refs.menuEl
+        if (!el) return
+        const h = el.offsetHeight || 0
+        const w = el.offsetWidth || 0
+        const pad = 4
+        let x = e.clientX
+        let y = e.clientY
+        if (y + h > window.innerHeight - pad) y = e.clientY - h
+        if (y < pad) y = pad
+        if (x + w > window.innerWidth - pad) x = window.innerWidth - w - pad
+        if (x < pad) x = pad
+        this.menu.x = x
+        this.menu.y = y
+      })
+      window.addEventListener('mousedown', this._onMenuAway)
+    },
+    closeMenu() {
+      this.menu.visible = false
+      window.removeEventListener('mousedown', this._onMenuAway)
+    },
+    menuAction(fn) {
+      this.closeMenu()
+      if (typeof fn === 'function') fn()
     },
     ok() {
       const list = this.steps.map((s) => ({
@@ -311,7 +736,7 @@ export default {
 <style scoped>
 .mr {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 280px 1fr;
   gap: 12px;
   min-height: 420px;
 }
@@ -331,12 +756,16 @@ export default {
   overflow: auto;
   border: 1px solid var(--el-border-color);
   background: #fff;
+  outline: none;
 }
 .mr-row {
   padding: 2px 8px;
   font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
+  height: 24px;
+  line-height: 20px;
+  box-sizing: border-box;
 }
 .mr-row.active {
   background: var(--el-color-primary);
@@ -366,6 +795,40 @@ export default {
 }
 .mr-btn {
   width: 100%;
+  margin-left: 0 !important;
   justify-content: flex-start;
+}
+</style>
+
+<style>
+.mr-ctx {
+  position: fixed;
+  z-index: 5000;
+  min-width: 160px;
+}
+.mr-ctx li {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+}
+.mr-ctx li.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+  cursor: default;
+}
+.mr-ctx li.sep {
+  height: 1px;
+  margin: 4px 8px;
+  padding: 0;
+  background: var(--app-border, #444);
+  cursor: default;
+  pointer-events: none;
+}
+.mr-ctx li.sep:hover {
+  background: var(--app-border, #444);
+}
+.mr-ctx .sc {
+  opacity: 0.65;
+  font-size: 11px;
 }
 </style>

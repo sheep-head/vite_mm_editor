@@ -966,11 +966,7 @@ export default {
 .ev-cmd-line.color-comment .ev-body { color: #6a994e; }
 .ev-cmd-line.color-end,
 .ev-cmd-line.color-end .ev-mark { color: #888; }
-.ev-cmd-line.selected,
-.ev-cmd-line.selected .ev-mark,
-.ev-cmd-line.selected .ev-label,
 .ev-note {
-  margin-left: 6px;
   color: #909399;
 }
 .ev-cmd-line.selected .ev-body,

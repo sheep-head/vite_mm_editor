@@ -74,6 +74,11 @@ export const DEFAULT_EDITOR_UI = {
   eventFillColor: 'rgba(0,0,0,0.3)',
   /** center 取帧正中；fit 整帧缩小到白框内 */
   eventLargeFit: 'center',
+  /**
+   * 地图整图缓存是否分批异步绘制。
+   * 关闭（默认）= 同步画完，换图不易叠内存；开启 = 不卡界面但大地图换图可能更不稳。
+   */
+  asyncMapLoad: false,
   /** 空/透明 → 棋盘格；否则铺纯色（不随地图滚动） */
   mapEmptyColor: '',
   blockedMapIds: [],

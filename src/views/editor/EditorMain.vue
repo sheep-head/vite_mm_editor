@@ -6,7 +6,7 @@
           <div class="mz-palette-body">
             <div v-if="editorMode === 'event'" class="mz-event-list">
               <el-input v-model="eventFilter" size="small" clearable placeholder="筛选 ID / 名称" />
-              <div class="mz-event-rows">
+              <div ref="eventRows" class="mz-event-rows">
                 <div
                   v-for="ev in filteredMapEvents"
                   :key="ev.id"
@@ -494,18 +494,12 @@ export default {
     currentMapEvents() {
       void this.eventListTick
       void this.selectedMapId
-      let events = null
+      // 只读 MapViewer 已加载数据；禁止在这里 sync 整份 MapXXX.json（换图会双倍解析，大图直接崩）
       const viewer = this.$refs.mapViewer
-      if (viewer && viewer.currentMapData && viewer.currentMapData.events) {
-        events = viewer.currentMapData.events
-      } else if (this.selectedMapId) {
-        try {
-          const map = DataManager.$loadDataSync(`Map${String(this.selectedMapId).padStart(3, '0')}`, false, false)
-          events = map && map.events
-        } catch (e) {
-          events = null
-        }
-      }
+      const events =
+        viewer && viewer.currentMapData && viewer.currentMapData.events
+          ? viewer.currentMapData.events
+          : null
       return (events || []).filter((ev) => ev && ev.id > 0)
     },
     modeLabel() {
@@ -574,6 +568,9 @@ export default {
     },
     editorVisible(v) {
       if (!v) this.editorRefMode = null
+    },
+    'selectedEventInfo.id'() {
+      this.scrollEventListToSelected()
     },
   },
   mounted() {
@@ -1081,11 +1078,23 @@ export default {
       this.selectedEventInfo = info
       this.eventListTick += 1
       this.closeCtx()
+      this.scrollEventListToSelected()
+    },
+    scrollEventListToSelected() {
+      const id = this.selectedEventInfo && this.selectedEventInfo.id
+      if (!id || this.editorMode !== 'event') return
+      this.$nextTick(() => {
+        const root = this.$refs.eventRows
+        if (!root) return
+        const row = root.querySelector('.mz-event-row.active')
+        if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' })
+      })
     },
     focusMapEvent(ev) {
       if (!ev || !this.selectedMapId) return
       this.selectedEventInfo = { id: ev.id, name: ev.name, x: ev.x, y: ev.y }
       this.$store.dispatch('requestFocusEvent', { mapId: this.selectedMapId, eventId: ev.id })
+      this.scrollEventListToSelected()
     },
     snapshotEvents() {
       const v = this.viewer()

@@ -2,78 +2,81 @@
   <el-dialog
     :model-value="modelValue"
     title="场所移动"
-    width="440px"
+    width="420px"
     append-to-body
     destroy-on-close
     :close-on-click-modal="false"
     @update:model-value="$emit('update:modelValue', $event)">
-    <el-form size="small" label-width="80px">
-      <el-form-item label="指定方式">
-        <el-radio-group v-model="direct">
-          <el-radio :value="0">直接指定</el-radio>
-          <el-radio :value="1">变量指定</el-radio>
-        </el-radio-group>
-      </el-form-item>
-      <template v-if="direct === 0">
-        <el-form-item label="地图">
-          <el-input-number v-model="mapId" :min="1" controls-position="right" />
-          <el-button size="small" @click="pickerVisible = true">...</el-button>
-          <span v-if="mapName" class="hint">{{ mapName }}</span>
-        </el-form-item>
-        <el-form-item label="X">
-          <el-input-number v-model="x" :min="0" controls-position="right" />
-        </el-form-item>
-        <el-form-item label="Y">
-          <el-input-number v-model="y" :min="0" controls-position="right" />
-        </el-form-item>
-      </template>
-      <template v-else>
-        <el-form-item label="地图变量">
-          <el-input-number v-model="mapId" :min="1" controls-position="right" />
-        </el-form-item>
-        <el-form-item label="X 变量">
-          <el-input-number v-model="x" :min="1" controls-position="right" />
-        </el-form-item>
-        <el-form-item label="Y 变量">
-          <el-input-number v-model="y" :min="1" controls-position="right" />
-        </el-form-item>
-      </template>
-      <el-form-item label="朝向">
-        <el-select v-model="direction" style="width: 140px">
+    <db-group-box title="位置">
+      <div class="loc">
+        <el-radio v-model="direct" :value="0">直接指定</el-radio>
+        <div class="loc-direct" :class="{ off: direct !== 0 }">
+          <el-input :model-value="directLabel" size="small" readonly :disabled="direct !== 0" />
+          <el-button size="small" :disabled="direct !== 0" @click="designVisible = true">...</el-button>
+        </div>
+
+        <el-radio v-model="direct" :value="1" class="loc-var-radio">变量指定</el-radio>
+        <div class="loc-vars" :class="{ off: direct !== 1 }">
+          <div class="loc-var-row">
+            <span class="lbl">编号</span>
+            <id-name-field v-model="varMap" type="variable" width="100%" :disabled="direct !== 1" />
+          </div>
+          <div class="loc-var-row">
+            <span class="lbl">横向</span>
+            <id-name-field v-model="varX" type="variable" width="100%" :disabled="direct !== 1" />
+          </div>
+          <div class="loc-var-row">
+            <span class="lbl">纵向</span>
+            <id-name-field v-model="varY" type="variable" width="100%" :disabled="direct !== 1" />
+          </div>
+        </div>
+      </div>
+    </db-group-box>
+
+    <div class="opts">
+      <div class="opt">
+        <div class="opt-label">朝向:</div>
+        <el-select v-model="direction" size="small" style="width: 100%">
           <el-option :value="0" label="不变" />
           <el-option :value="2" label="下" />
           <el-option :value="4" label="左" />
           <el-option :value="6" label="右" />
           <el-option :value="8" label="上" />
         </el-select>
-      </el-form-item>
-      <el-form-item label="淡入淡出">
-        <el-select v-model="fade" style="width: 140px">
+      </div>
+      <div class="opt">
+        <div class="opt-label">淡入淡出:</div>
+        <el-select v-model="fade" size="small" style="width: 100%">
           <el-option :value="0" label="黑" />
           <el-option :value="1" label="白" />
           <el-option :value="2" label="无" />
         </el-select>
-      </el-form-item>
-    </el-form>
+      </div>
+    </div>
+
     <template #footer>
-      <el-button @click="$emit('update:modelValue', false)">取消</el-button>
       <el-button type="primary" @click="ok">确定</el-button>
+      <el-button @click="$emit('update:modelValue', false)">取消</el-button>
     </template>
-    <id-name-picker-dialog
-      v-model="pickerVisible"
-      type="map"
-      :model-id="mapId"
-      @confirm="onPick" />
+
+    <map-designation-dialog
+      v-model="designVisible"
+      :map-id="mapId"
+      :x="x"
+      :y="y"
+      @confirm="onDesign" />
   </el-dialog>
 </template>
 
 <script>
 import DataManager from '@/utils/DataManager'
-import IdNamePickerDialog from '../pickers/IdNamePickerDialog.vue'
+import DbGroupBox from '@/components/database/shared/DbGroupBox.vue'
+import IdNameField from '@/components/database/shared/IdNameField.vue'
+import MapDesignationDialog from '../MapDesignationDialog.vue'
 
 export default {
   name: 'Cmd201Transfer',
-  components: { IdNamePickerDialog },
+  components: { DbGroupBox, IdNameField, MapDesignationDialog },
   props: {
     modelValue: { type: Boolean, default: false },
     command: { type: Object, default: null },
@@ -85,21 +88,26 @@ export default {
       mapId: 1,
       x: 0,
       y: 0,
+      varMap: 1,
+      varX: 1,
+      varY: 1,
       direction: 0,
       fade: 0,
-      pickerVisible: false,
+      designVisible: false,
     }
   },
   computed: {
     mapName() {
-      if (this.direct !== 0) return ''
       try {
         const infos = DataManager.$loadDataSync('MapInfos', false, false) || []
         const info = infos[this.mapId]
-        return info && info.name ? info.name : ''
+        return (info && info.name) || `地图${this.mapId}`
       } catch (e) {
-        return ''
+        return `地图${this.mapId}`
       }
+    },
+    directLabel() {
+      return `${this.mapName} (${this.x},${this.y})`
     },
   },
   watch: {
@@ -109,24 +117,35 @@ export default {
         if (!v) return
         const p = (this.command && this.command.parameters) || [0, 1, 0, 0, 0, 0]
         this.direct = p[0] === 1 ? 1 : 0
-        this.mapId = p[1] || 1
-        this.x = p[2] || 0
-        this.y = p[3] || 0
         this.direction = p[4] || 0
         this.fade = p[5] || 0
+        if (this.direct === 0) {
+          this.mapId = p[1] || 1
+          this.x = p[2] || 0
+          this.y = p[3] || 0
+        } else {
+          this.varMap = p[1] || 1
+          this.varX = p[2] || 1
+          this.varY = p[3] || 1
+        }
       },
     },
   },
   methods: {
-    onPick(id) {
-      this.mapId = id
+    onDesign({ mapId, x, y }) {
+      this.mapId = mapId
+      this.x = x
+      this.y = y
     },
     ok() {
+      const mapId = this.direct === 0 ? this.mapId : this.varMap
+      const x = this.direct === 0 ? this.x : this.varX
+      const y = this.direct === 0 ? this.y : this.varY
       this.$emit('confirm', [
         {
           code: 201,
           indent: (this.command && this.command.indent) || 0,
-          parameters: [this.direct, this.mapId, this.x, this.y, this.direction, this.fade],
+          parameters: [this.direct, mapId, x, y, this.direction, this.fade],
         },
       ])
       this.$emit('update:modelValue', false)
@@ -136,9 +155,59 @@ export default {
 </script>
 
 <style scoped>
-.hint {
-  margin-left: 8px;
-  color: var(--app-text-muted, #888);
+.loc {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.loc-direct {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 8px 22px;
+}
+.loc-direct :deep(.el-input) {
+  flex: 1;
+}
+.loc-var-radio {
+  margin-top: 2px;
+}
+.loc-vars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 0 22px;
+}
+.loc-var-row {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  align-items: center;
+  gap: 6px;
+}
+.loc-var-row .lbl {
   font-size: 12px;
+  color: var(--app-text, #303133);
+}
+.loc-var-row :deep(.id-name-field) {
+  width: 100%;
+  min-width: 0;
+}
+.loc-var-row :deep(.el-input) {
+  flex: 1;
+  min-width: 0;
+}
+.loc .off {
+  opacity: 0.55;
+  pointer-events: none;
+}
+.opts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 14px;
+}
+.opt-label {
+  font-size: 12px;
+  margin-bottom: 4px;
 }
 </style>

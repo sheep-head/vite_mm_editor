@@ -6,6 +6,8 @@
     :character-id="characterId"
     :route="route"
     :map-events="mapEvents"
+    :preview-map-id="selectedMapId || 0"
+    :preview-starts="previewStarts"
     @update:model-value="$emit('update:modelValue', $event)"
     @confirm="onConfirm" />
 </template>
@@ -17,6 +19,9 @@ import MoveRouteEditor from '../MoveRouteEditor.vue'
 export default {
   name: 'Cmd205MoveRoute',
   components: { MoveRouteEditor },
+  inject: {
+    editingMapEvent: { default: null },
+  },
   props: { modelValue: Boolean, command: Object },
   emits: ['update:modelValue', 'confirm'],
   data() {
@@ -24,6 +29,7 @@ export default {
       characterId: 0,
       route: { list: [{ code: 0, parameters: [] }], repeat: false, skippable: false, wait: true },
       mapEvents: [],
+      previewStarts: {},
     }
   },
   computed: {
@@ -44,6 +50,7 @@ export default {
           wait: r.wait !== false,
         }
         this.loadMapEvents()
+        this.buildPreviewStarts()
       },
     },
   },
@@ -65,6 +72,53 @@ export default {
         console.error(e)
       }
       this.mapEvents = out
+    },
+    buildPreviewStarts() {
+      const starts = {}
+      let map = null
+      try {
+        const id = this.selectedMapId
+        if (id) map = DataManager.$loadDataSync(`Map${String(id).padStart(3, '0')}`, false, false)
+      } catch (e) {
+        map = null
+      }
+      let player = { x: 0, y: 0, characterName: '', characterIndex: 0, direction: 2 }
+      try {
+        const sys = DataManager.$loadDataSync('System', false, false) || {}
+        if (sys.startMapId === this.selectedMapId) {
+          player.x = sys.startX || 0
+          player.y = sys.startY || 0
+        }
+        if (sys.airship) {
+          /* keep empty player graphic; preview uses blank or default */
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      starts[-1] = player
+      const selfEv = typeof this.editingMapEvent === 'function' ? this.editingMapEvent() : null
+      const selfPage = selfEv && selfEv.pages && selfEv.pages[0]
+      const selfImg = (selfPage && selfPage.image) || {}
+      starts[0] = {
+        x: (selfEv && selfEv.x) || 0,
+        y: (selfEv && selfEv.y) || 0,
+        characterName: selfImg.characterName || '',
+        characterIndex: selfImg.characterIndex || 0,
+        direction: selfImg.direction || 2,
+      }
+      ;(map && map.events ? map.events : []).forEach((ev) => {
+        if (!ev || !ev.id) return
+        const page = (ev.pages && ev.pages[0]) || {}
+        const image = page.image || {}
+        starts[ev.id] = {
+          x: ev.x || 0,
+          y: ev.y || 0,
+          characterName: image.characterName || '',
+          characterIndex: image.characterIndex || 0,
+          direction: image.direction || 2,
+        }
+      })
+      this.previewStarts = starts
     },
     onConfirm({ characterId, route }) {
       const indent = (this.command && this.command.indent) || 0

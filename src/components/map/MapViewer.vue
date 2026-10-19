@@ -13,6 +13,7 @@
           @contextmenu="onContextMenu" />
         <div v-if="!mapId" class="map-empty">请从左侧地图列表选择地图</div>
         <div v-else-if="loadError" class="map-empty">{{ loadError }}</div>
+        <div v-else-if="mapLoading" class="map-empty">加载中…</div>
         <!-- 覆盖式滚动条：不挤占画布 -->
         <div
           v-show="scrollMetrics.showV"
@@ -39,6 +40,7 @@
 </template>
 
 <script>
+import { markRaw } from 'vue'
 import { mapGetters } from 'vuex'
 import DataManager from '@/utils/DataManager'
 import { fs, path, isNw } from '@/utils/nw'
@@ -68,6 +70,15 @@ const WALK_ANIM_FPS = 10
 const FOCUS_RING_CYCLE_MS = 800
 /** untilAction：极短保护，避免同一次点击立刻清掉 */
 const FOCUS_RING_MIN_MS = 80
+/** 视口缓冲：只缓存可见附近，禁止整图 canvas */
+const VIEW_BUF_MAX_EDGE = 2048
+const VIEW_BUF_PAD_TILES = 8
+/** 单次重建最多绘制的格子数，防止 fit 全图时一次画几十万格把进程打崩 */
+const VIEW_BUF_MAX_TILES = 4096
+/** fit/初始缩放：可见格过多则不再继续缩小（整图入镜会拖死主线程） */
+const FIT_MAX_VISIBLE_TILES = 160 * 100
+/** 滚动条轨道虚拟长度：禁止用 mapW*zoom 做 DOM spacer（大地图会直接把 NW 打崩） */
+const SCROLL_TRACK = 10000
 
 export default {
   name: 'MapViewer',
@@ -96,7 +107,6 @@ export default {
   ],
   data() {
     return {
-      currentMapData: null,
       tilesets: {},
       flags: [],
       tilesetImages: {},
@@ -140,13 +150,13 @@ export default {
         airship: { mapId: 0, x: 0, y: 0, characterName: '', characterIndex: 0 },
       },
       loadError: '',
+      mapLoading: false,
       pendingFit: false,
       syncingScroll: false,
       scrollTick: 0,
       _raf: 0,
-      FLOOR_AUTOTILE_TABLE,
-      WALL_AUTOTILE_TABLE,
-      WATERFALL_AUTOTILE_TABLE,
+      _loadToken: 0,
+      _paintToken: 0,
     }
   },
   computed: {
@@ -191,6 +201,7 @@ export default {
           vMax: 0,
           hVal: 0,
           vVal: 0,
+          track: SCROLL_TRACK,
         }
       }
       const mapW = this.currentMapData.width * this.tileWidth * this.zoom
@@ -201,17 +212,19 @@ export default {
       const showV = mapH > sh + 1
       const hMax = showH ? mapW - sw : 0
       const vMax = showV ? mapH - sh : 0
-      const hVal = showH ? Math.max(0, Math.min(hMax, -this.offsetX)) : 0
-      const vVal = showV ? Math.max(0, Math.min(vMax, -this.offsetY)) : 0
+      // 用固定轨道映射偏移，spacer 恒为 TRACK，与地图像素尺寸脱钩
+      const hRatio = hMax > 0 ? Math.max(0, Math.min(1, -this.offsetX / hMax)) : 0
+      const vRatio = vMax > 0 ? Math.max(0, Math.min(1, -this.offsetY / vMax)) : 0
       return {
         showH,
         showV,
-        contentW: Math.max(sw + 1, mapW),
-        contentH: Math.max(sh + 1, mapH),
+        contentW: showH ? SCROLL_TRACK + sw : 1,
+        contentH: showV ? SCROLL_TRACK + sh : 1,
         hMax,
         vMax,
-        hVal,
-        vVal,
+        hVal: hRatio * SCROLL_TRACK,
+        vVal: vRatio * SCROLL_TRACK,
+        track: SCROLL_TRACK,
       }
     },
   },
@@ -231,8 +244,6 @@ export default {
       },
     },
     editLayer() {
-      this.needsRedraw = true
-      this.renderToCache()
       this.render()
     },
     showGrid() {
@@ -327,7 +338,9 @@ export default {
     if (this.previewWalkAnim) this.startWalkAnim()
   },
   created() {
+    this.currentMapData = null
     this._focusRing = null
+    this._focusBase = null
     this._focusRaf = 0
     this._focusTimer = 0
     this._pendingFocus = null
@@ -335,8 +348,29 @@ export default {
     this._mapBgName = ''
     this._rendering = false
     this._panFrame = 0
+    this._cachePainting = false
+    this._pendingCacheRedraw = false
+    this._cacheMetrics = null
+    this._viewBuf = null
+    this._viewBufMeta = null
+    this._viewBufDirty = true
+    this._bufTw = 0
+    this._bufTh = 0
+    this._mapPaint = null
+    this._mapPaintReady = false
+    this._bufJob = null
+      this._bufToken = 0
+      this._bufRaf = 0
+      this._interacting = false
+      this._interactTimer = 0
   },
   beforeUnmount() {
+    this._loadToken += 1
+    this._paintToken += 1
+    this._cachePainting = false
+    this._pendingCacheRedraw = false
+    this._cacheMetrics = null
+    this.releaseMapCaches()
     window.removeEventListener('resize', this._onResize)
     if (this._ro) this._ro.disconnect()
     if (this._raf) cancelAnimationFrame(this._raf)
@@ -361,21 +395,6 @@ export default {
     },
 
     refreshEventsLayer() {
-      if (!this.currentMapData) return
-      const width = this.currentMapData.width
-      const height = this.currentMapData.height
-      const w = width * this.tileWidth
-      const h = height * this.tileHeight
-      // 复用离屏画布，避免动画帧反复分配导致内存暴涨崩溃
-      if (!this.eventsCache || this.eventsCache.width !== w || this.eventsCache.height !== h) {
-        this.eventsCache = document.createElement('canvas')
-        this.eventsCache.width = w
-        this.eventsCache.height = h
-      } else {
-        const ectx = this.eventsCache.getContext('2d')
-        ectx.clearRect(0, 0, w, h)
-      }
-      this.renderEventsToCache(this.eventsCache.getContext('2d'))
       this.render()
     },
 
@@ -442,26 +461,114 @@ export default {
 
     loadTilesetsIndex() {
       const arr = DataManager.$loadDataSync('Tilesets', false, false)
-      this.tilesets = {}
+      const next = {}
       if (Array.isArray(arr)) {
         arr.forEach((t) => {
-          if (t && t.id) this.tilesets[t.id] = t
+          if (t && t.id) next[t.id] = markRaw(t)
         })
       }
+      this.tilesets = markRaw(next)
     },
 
+    frameYield() {
+      return new Promise((resolve) => requestAnimationFrame(() => resolve()))
+    },
+    readMapFile(mapPath) {
+      return new Promise((resolve, reject) => {
+        try {
+          if (typeof fs.readFile === 'function') {
+            fs.readFile(mapPath, 'utf-8', (err, data) => {
+              if (err) reject(err)
+              else resolve(typeof data === 'string' ? data : String(data))
+            })
+            return
+          }
+          resolve(fs.readFileSync(mapPath, 'utf-8'))
+        } catch (e) {
+          reject(e)
+        }
+      })
+    },
+    releaseMapCaches() {
+      this._cachePainting = false
+      this._cacheMetrics = null
+      this.invalidateViewBuf()
+      const drop = (c) => {
+        if (!c) return
+        try {
+          c.width = 1
+          c.height = 1
+        } catch (e) {
+          /* ignore */
+        }
+      }
+      if (this._bufRaf) cancelAnimationFrame(this._bufRaf)
+      this._bufRaf = 0
+      if (this._fillRaf) clearTimeout(this._fillRaf)
+      this._fillRaf = 0
+      this._fill = null
+      this._bufJob = null
+      this._bufToken += 1
+      drop(this.mapCache)
+      drop(this.eventsCache)
+      drop(this.regionsCache)
+      this._viewBufMeta = null
+      if (this._viewBuf) {
+        const ctx = this._viewBuf.getContext('2d')
+        if (ctx) ctx.clearRect(0, 0, this._viewBuf.width, this._viewBuf.height)
+      }
+      this._mapPaintReady = false
+      this._mapPaintTw = 0
+      this._mapPaintTh = 0
+      this.mapCache = null
+      this.eventsCache = null
+      this.regionsCache = null
+    },
+    /** 视口缓冲只创建一次，之后只 clear，不再改尺寸或销毁 */
+    acquireViewBuf() {
+      if (this._viewBuf) return this._viewBuf
+      const canvas = document.createElement('canvas')
+      canvas.width = VIEW_BUF_MAX_EDGE
+      canvas.height = VIEW_BUF_MAX_EDGE
+      this._viewBuf = canvas
+      return canvas
+    },
+    invalidateViewBuf() {
+      this._viewBufDirty = true
+    },
+    /** 缓冲绘制时的格宽（可小于 48）；屏幕直绘时用 tileWidth */
+    cacheTw() {
+      return this._bufTw || this.tileWidth
+    },
+    cacheTh() {
+      return this._bufTh || this.tileHeight
+    },
     async loadMap(mapId) {
+      const token = ++this._loadToken
+      this._paintToken += 1
+      this._cachePainting = false
+      this._pendingCacheRedraw = false
+      this.mapLoading = true
+      this.stopWalkAnim(false)
+      this.clearFocusRing(true)
+      this.releaseMapCaches()
       this.loadError = ''
       this.selectedTile = null
       this.selectedEventId = 0
       this.characterImages = {}
-      if (!isNw || !fs || !path || !this.workRoot) {
-        this.loadError = '需要 NW.js 工作空间才能加载地图'
-        this.$emit('error', this.loadError)
-        return
-      }
+      this.currentMapData = null
+      this.zoom = Math.min(1, Math.max(0.05, this.zoom || 1))
+      this.needsRedraw = true
+      this.render()
       try {
-        if (!Object.keys(this.tilesets).length) this.loadTilesetsIndex()
+        await this.$nextTick()
+        if (token !== this._loadToken) return
+        if (!isNw || !fs || !path || !this.workRoot) {
+          this.loadError = '需要 NW.js 工作空间才能加载地图'
+          this.$emit('error', this.loadError)
+          return
+        }
+        if (!this.tilesets || !Object.keys(this.tilesets).length) this.loadTilesetsIndex()
         const mapFileName = `Map${String(mapId).padStart(3, '0')}.json`
         const mapPath = path.join(this.workRoot, 'data', mapFileName)
         if (!fs.existsSync(mapPath)) {
@@ -469,37 +576,78 @@ export default {
           this.$emit('error', this.loadError)
           return
         }
-        this.currentMapData = JSON.parse(fs.readFileSync(mapPath, 'utf-8'))
-        if (!Array.isArray(this.currentMapData.events)) this.currentMapData.events = [null]
-        this.loadStartPosition()
-        await this.loadTilesetImages()
-        await this.preloadEventCharacters()
-        await this.preloadStartCharacters()
-        this.loadTilesetFlags()
-        this.needsRedraw = true
+        // immediate watcher 可能早于 mounted：等到 canvas 就绪再继续
+        for (let i = 0; i < 30 && !this.canvas; i++) {
+          await this.frameYield()
+          if (token !== this._loadToken) return
+        }
+        if (!this.canvas) {
+          this.loadError = '画布未就绪'
+          this.$emit('error', this.loadError)
+          return
+        }
+        const text = await this.readMapFile(mapPath)
+        if (token !== this._loadToken) return
+        let map
+        try {
+          map = JSON.parse(text)
+        } catch (e) {
+          throw new Error('地图 JSON 解析失败')
+        }
+        if (token !== this._loadToken) return
+        if (!map || !map.width || !map.height) throw new Error('地图尺寸无效')
+        if (!Array.isArray(map.events)) map.events = [null]
+
         const willFocus = !!(
           (this._pendingFocus && this._pendingFocus.mapId === mapId) ||
           (this.focusEventRequest && this.focusEventRequest.mapId === mapId)
         )
-        // 有定位请求时不要先 fit，后面会切到实际大小并居中
-        this.pendingFit = !willFocus
-        this.$nextTick(() => {
-          this.resizeCanvas()
-          if (!willFocus) this.fitToView()
-          else {
-            this.zoom = 1
-            this.emitZoom()
-          }
-          this.renderToCache()
-          this.render()
-          if (this.previewWalkAnim) this.startWalkAnim()
-          this.tryPendingFocus(mapId)
-          this.$emit('ready', { mapId })
-        })
+        this.resizeCanvas()
+        const cw = Math.max(1, (this.canvas && this.canvas.width) || 800)
+        const ch = Math.max(1, (this.canvas && this.canvas.height) || 600)
+        const mapPxW = Math.max(1, Number(map.width) * this.tileWidth)
+        const mapPxH = Math.max(1, Number(map.height) * this.tileHeight)
+        // 先定安全缩放再挂数据，避免中间帧撑爆滚动条 DOM / 整图绘制卡死
+        this.zoom = willFocus ? 1 : this.safeFitZoom(mapPxW, mapPxH, cw, ch)
+        this.offsetX = (cw - mapPxW * this.zoom) / 2
+        this.offsetY = (ch - mapPxH * this.zoom) / 2
+        this.velocityX = 0
+        this.velocityY = 0
+        this.currentMapData = markRaw(map)
+        this.invalidateViewBuf()
+        this.loadStartPosition()
+        // 图块未就绪前不重绘整屏，只更新滚动条状态
+        this.emitZoom()
+        this.bumpScroll()
+
+        await this.loadTilesetImages()
+        if (token !== this._loadToken) return
+        this.loadTilesetFlags()
+        this.pendingFit = false
+        if (!willFocus) this.fitToView({ render: false })
+        else this.emitZoom()
+        if (token !== this._loadToken) return
+        await this.frameYield()
+        if (token !== this._loadToken) return
+        this.render()
+        if (this.previewWalkAnim) this.startWalkAnim()
+        this.tryPendingFocus(mapId)
+        this.$emit('ready', { mapId })
+        // 行走图后台限流加载，不阻塞首帧
+        this.preloadEventCharacters(token)
+          .then(() => this.preloadStartCharacters())
+          .then(() => {
+            if (token !== this._loadToken) return
+            this.render()
+          })
+          .catch((e) => console.error(e))
       } catch (e) {
+        if (token !== this._loadToken) return
         console.error(e)
-        this.loadError = '加载地图失败: ' + e.message
+        this.loadError = '加载地图失败: ' + ((e && e.message) || e)
         this.$emit('error', this.loadError)
+      } finally {
+        if (token === this._loadToken && !this._bufJob) this.mapLoading = false
       }
     },
 
@@ -660,6 +808,27 @@ export default {
       }
     },
 
+    /**
+     * 未到期时循环收缩。到期后只把当前这一轮收到事件框，
+     * 若刚好翻到外圈则直接结束，不再从外圈重放。
+     * @returns {number|null} 0..1，null 表示该消失
+     */
+    focusRingSample(ring, now = Date.now()) {
+      if (!ring) return null
+      const cycle = FOCUS_RING_CYCLE_MS
+      const elapsed = Math.max(0, now - ring.start)
+      if (!(ring.endAt && now >= ring.endAt)) {
+        return (elapsed % cycle) / cycle
+      }
+      if (ring.finishAt == null) {
+        const phase = elapsed % cycle
+        ring.finishAt = phase < 40 ? now : ring.start + (elapsed - phase) + cycle
+      }
+      if (now >= ring.finishAt) return null
+      const shown = Math.min(elapsed, ring.finishAt - ring.start - 1)
+      return (shown % cycle) / cycle
+    },
+
     startFocusRingAnim() {
       if (this._focusRaf) return
       const tick = () => {
@@ -668,25 +837,16 @@ export default {
           this._focusRaf = 0
           return
         }
-        // 倒计时到期：播完「当前这一轮收缩到格子」(t→1) 立刻释放，切勿进入下一轮最外圈
-        if (ring.endAt && Date.now() >= ring.endAt) {
-          const elapsed = Date.now() - ring.start
-          const cycleIndex = Math.floor(elapsed / FOCUS_RING_CYCLE_MS)
-          const phase = elapsed % FOCUS_RING_CYCLE_MS
-          if (ring.finishCycleIndex == null) ring.finishCycleIndex = cycleIndex
-          const done =
-            cycleIndex > ring.finishCycleIndex ||
-            (cycleIndex === ring.finishCycleIndex && phase >= FOCUS_RING_CYCLE_MS - 20)
-          if (done) {
-            this._focusRaf = 0
-            this._focusRing = null
-            try {
-              this.render()
-            } catch (e) {
-              console.error(e)
-            }
-            return
+        if (this.focusRingSample(ring) == null) {
+          this._focusRaf = 0
+          this._focusRing = null
+          if (this._focusBase) this._focusBase.mapId = 0
+          try {
+            this.render()
+          } catch (e) {
+            console.error(e)
           }
+          return
         }
         try {
           this.render()
@@ -720,10 +880,13 @@ export default {
           this._walkRaf = 0
           return
         }
-        if (!this._walkLastTs || ts - this._walkLastTs >= stepMs) {
-          this._walkLastTs = ts
-          this._walkAnimTick = (this._walkAnimTick + 1) | 0
-          this.refreshEventsLayer()
+        if (this.currentMapData) {
+          if (!this._walkLastTs || ts - this._walkLastTs >= stepMs) {
+            this._walkLastTs = ts
+            this._walkAnimTick = (this._walkAnimTick + 1) | 0
+            if (this._focusBase) this._focusBase.mapId = 0
+            this.render()
+          }
         }
         this._walkRaf = requestAnimationFrame(tick)
       }
@@ -865,7 +1028,7 @@ export default {
         const imgFile = path.join(imgPath, tilesetName + '.png')
         if (!fs.existsSync(imgFile)) continue
         const img = await this.loadImageFile(imgFile)
-        if (img) this.tilesetImages[tilesetName] = img
+        if (img) this.tilesetImages[tilesetName] = markRaw(img)
       }
     },
 
@@ -878,18 +1041,24 @@ export default {
         return null
       }
       const img = await this.loadImageFile(imgFile)
-      this.characterImages[name] = img
-      return img
+      this.characterImages[name] = img ? markRaw(img) : null
+      return this.characterImages[name]
     },
 
-    async preloadEventCharacters() {
+    async preloadEventCharacters(token) {
       const names = new Set()
       ;(this.currentMapData.events || []).forEach((ev) => {
         if (!ev || !ev.pages || !ev.pages[0] || !ev.pages[0].image) return
         const n = ev.pages[0].image.characterName
         if (n) names.add(n)
       })
-      for (const n of names) await this.ensureCharacterImage(n)
+      // 限流：避免一张图上百张行走图同时解码把 NW 打崩
+      const list = [...names]
+      const conc = 4
+      for (let i = 0; i < list.length; i += conc) {
+        if (token != null && token !== this._loadToken) return
+        await Promise.all(list.slice(i, i + conc).map((n) => this.ensureCharacterImage(n)))
+      }
     },
 
     async preloadStartCharacters() {
@@ -977,40 +1146,8 @@ export default {
       data[(z * height + y) * width + x] = tileId || 0
     },
 
-    invalidateMapCells(cellKeys) {
-      if (!this.currentMapData) return
-      if (!this.mapCache || this.needsRedraw) {
-        this.needsRedraw = true
-        this.renderToCache()
-        this.render()
-        return
-      }
-      const ctx = this.mapCache.getContext('2d')
-      const seen = new Set()
-      cellKeys.forEach((key) => {
-        const [xs, ys] = key.split(',')
-        const x = Number(xs)
-        const y = Number(ys)
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const nx = x + dx
-            const ny = y + dy
-            const k = `${nx},${ny}`
-            if (seen.has(k)) continue
-            if (!this.inMapBounds(nx, ny)) continue
-            seen.add(k)
-            ctx.clearRect(nx * this.tileWidth, ny * this.tileHeight, this.tileWidth, this.tileHeight)
-            this.paintTileToContext(ctx, nx, ny)
-          }
-        }
-      })
-      // region 层可能变化
-      const cacheW = this.currentMapData.width * this.tileWidth
-      const cacheH = this.currentMapData.height * this.tileHeight
-      if (this.regionsCache) {
-        this.regionsCache.getContext('2d').clearRect(0, 0, cacheW, cacheH)
-        this.renderRegionsToCache(this.regionsCache.getContext('2d'))
-      }
+    invalidateMapCells() {
+      if (this._focusBase) this._focusBase.mapId = 0
       this.render()
     },
 
@@ -1346,43 +1483,150 @@ export default {
       this.ctx.restore()
     },
 
-    renderToCache() {
-      if (!this.currentMapData) return
-      const width = this.currentMapData.width
-      const height = this.currentMapData.height
+    /** 当前屏幕可见的地图格范围 */
+    visibleTileRange(pad = 2) {
+      if (!this.currentMapData || !this.canvas) return null
+      const tw = this.tileWidth * this.zoom
+      const th = this.tileHeight * this.zoom
+      if (!(tw > 0) || !(th > 0)) return null
+      let x0 = Math.floor(-this.offsetX / tw) - pad
+      let y0 = Math.floor(-this.offsetY / th) - pad
+      let x1 = Math.ceil((-this.offsetX + this.canvas.width) / tw) + pad
+      let y1 = Math.ceil((-this.offsetY + this.canvas.height) / th) + pad
+      x0 = Math.max(0, x0)
+      y0 = Math.max(0, y0)
+      x1 = Math.min(this.currentMapData.width - 1, x1)
+      y1 = Math.min(this.currentMapData.height - 1, y1)
+      if (x1 < x0 || y1 < y0) return null
+      return { x0, y0, x1, y1 }
+    },
+    /**
+     * 视口附近一块缓冲：每格都画，禁止抽格拉伸。
+     * 拖拽仍在缓冲内则直接 blit；缩放改变分辨率或走出范围则整块重画。
+     * 换地图时 loadMap 会 releaseMapCaches 丢掉这块缓冲。
+     */
+    ensureViewBuf(vis) {
+      if (!vis || !this.currentMapData) return null
+      const mapW = this.currentMapData.width
+      const mapH = this.currentMapData.height
+      const layerKey = String(this.editLayer)
+      const visCount = Math.max(1, vis.x1 - vis.x0 + 1) * Math.max(1, vis.y1 - vis.y0 + 1)
+      const pad = visCount > VIEW_BUF_MAX_TILES ? 0 : VIEW_BUF_PAD_TILES
+      const x0 = Math.max(0, vis.x0 - pad)
+      const y0 = Math.max(0, vis.y0 - pad)
+      const x1 = Math.min(mapW - 1, vis.x1 + pad)
+      const y1 = Math.min(mapH - 1, vis.y1 + pad)
+      const tilesW = Math.max(1, x1 - x0 + 1)
+      const tilesH = Math.max(1, y1 - y0 + 1)
+      let scale = Math.min(
+        1,
+        VIEW_BUF_MAX_EDGE / (tilesW * this.tileWidth),
+        VIEW_BUF_MAX_EDGE / (tilesH * this.tileHeight)
+      )
+      if (!Number.isFinite(scale) || scale <= 0) scale = 1
+      let tw = Math.max(1, Math.floor(this.tileWidth * scale))
+      let th = Math.max(1, Math.floor(this.tileHeight * scale))
+      while (tilesW * tw > VIEW_BUF_MAX_EDGE && tw > 1) tw -= 1
+      while (tilesH * th > VIEW_BUF_MAX_EDGE && th > 1) th -= 1
 
-      if (!this.mapCache || this.needsRedraw) {
-        this.mapCache = document.createElement('canvas')
-        this.mapCache.width = width * this.tileWidth
-        this.mapCache.height = height * this.tileHeight
-        const cacheCtx = this.mapCache.getContext('2d')
-        for (let y = 0; y < height; y++) {
-          for (let x = 0; x < width; x++) {
-            this.paintTileToContext(cacheCtx, x, y)
+      const meta = this._viewBufMeta
+      const zoom = this.zoom
+      if (this._interacting) {
+        if (this._viewBuf && meta && meta.zoom === zoom) return meta
+        return null
+      }
+      if (this._bufJob) return meta
+      if (
+        this._viewBuf &&
+        !this._viewBufDirty &&
+        meta &&
+        meta.layerKey === layerKey &&
+        meta.zoom === zoom &&
+        meta.tw >= tw &&
+        meta.th >= th &&
+        vis.x0 >= meta.x0 &&
+        vis.x1 <= meta.x1 &&
+        vis.y0 >= meta.y0 &&
+        vis.y1 <= meta.y1
+      ) {
+        return meta
+      }
+
+      const cw = Math.max(1, tilesW * tw)
+      const ch = Math.max(1, tilesH * th)
+      if (cw > VIEW_BUF_MAX_EDGE || ch > VIEW_BUF_MAX_EDGE) return null
+
+      const canvas = this.acquireViewBuf()
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return null
+      ctx.imageSmoothingEnabled = false
+      ctx.clearRect(0, 0, cw, ch)
+      const token = ++this._bufToken
+      if (this._bufRaf) cancelAnimationFrame(this._bufRaf)
+      this._bufJob = { x0, y0, x1, y1, y: y0, tw, th, layerKey, token, loadToken: this._loadToken }
+      this._viewBufMeta = { x0, y0, x1, y1, tw, th, layerKey, zoom }
+      this._viewBufDirty = true
+      this.stepViewBuf()
+      return this._viewBufMeta
+    },
+
+    /** 视口缓冲分几行画完，避免一次画完整张大图 */
+    stepViewBuf() {
+      const job = this._bufJob
+      if (!job || job.token !== this._bufToken) return
+      const canvas = this._viewBuf
+      const ctx = canvas && canvas.getContext('2d')
+      if (!ctx) {
+        this._bufJob = null
+        return
+      }
+      const yEnd = Math.min(job.y1, job.y + 3)
+      this._bufTw = job.tw
+      this._bufTh = job.th
+      try {
+        for (let y = job.y; y <= yEnd; y++) {
+          for (let x = job.x0; x <= job.x1; x++) {
+            this.paintTileToContext(ctx, x, y, job.x0, job.y0)
           }
         }
-        this.needsRedraw = false
+      } finally {
+        this._bufTw = 0
+        this._bufTh = 0
       }
+      job.y = yEnd + 1
+      if (job.y <= job.y1 && job.token === this._bufToken) {
+        this._bufRaf = requestAnimationFrame(() => {
+          this._bufRaf = 0
+          this.stepViewBuf()
+          this.render()
+        })
+        return
+      }
+      this._bufJob = null
+      this._viewBufDirty = false
+      if (job.loadToken === this._loadToken) this.mapLoading = false
+      this.render()
+    },
 
-      const cacheW = width * this.tileWidth
-      const cacheH = height * this.tileHeight
-      if (!this.regionsCache || this.regionsCache.width !== cacheW || this.regionsCache.height !== cacheH) {
-        this.regionsCache = document.createElement('canvas')
-        this.regionsCache.width = cacheW
-        this.regionsCache.height = cacheH
-      } else {
-        this.regionsCache.getContext('2d').clearRect(0, 0, cacheW, cacheH)
-      }
-      this.renderRegionsToCache(this.regionsCache.getContext('2d'))
-
-      if (!this.eventsCache || this.eventsCache.width !== cacheW || this.eventsCache.height !== cacheH) {
-        this.eventsCache = document.createElement('canvas')
-        this.eventsCache.width = cacheW
-        this.eventsCache.height = cacheH
-      } else {
-        this.eventsCache.getContext('2d').clearRect(0, 0, cacheW, cacheH)
-      }
-      this.renderEventsToCache(this.eventsCache.getContext('2d'))
+    /** 拖拽、滚轮、滚动条期间只贴已有缓冲，松手后再补画 */
+    noteInteract() {
+      this._interacting = true
+      this._bufToken += 1
+      this._bufJob = null
+      if (this._bufRaf) cancelAnimationFrame(this._bufRaf)
+      this._bufRaf = 0
+      if (this._interactTimer) clearTimeout(this._interactTimer)
+      this._interactTimer = setTimeout(() => {
+        this._interactTimer = 0
+        this._interacting = false
+        this.render()
+      }, 90)
+    },
+    renderToCache() {
+      this.invalidateViewBuf()
+    },
+    async renderToCacheAsync() {
+      this.invalidateViewBuf()
     },
 
     layerAlpha(z) {
@@ -1390,26 +1634,32 @@ export default {
       return this.editLayer === z ? 1 : DIM_ALPHA
     },
 
-    paintTileToContext(ctx, mx, my) {
+    paintTileToContext(ctx, mx, my, originX = 0, originY = 0, absX, absY) {
+      if (!ctx || !this.currentMapData) return
       const tiles = [
         this.readMapData(mx, my, 0),
         this.readMapData(mx, my, 1),
         this.readMapData(mx, my, 2),
         this.readMapData(mx, my, 3),
       ]
-      const dx = mx * this.tileWidth
-      const dy = my * this.tileHeight
+      const tw = this.cacheTw()
+      const th = this.cacheTh()
+      const dx = absX != null ? absX : (mx - originX) * tw
+      const dy = absY != null ? absY : (my - originY) * th
       const originalCtx = this.ctx
       this.ctx = ctx
-      for (let z = 0; z < 4; z++) {
-        if (!tiles[z]) continue
-        ctx.save()
-        ctx.globalAlpha = this.layerAlpha(z)
-        this.drawTile(tiles[z], dx, dy)
-        ctx.restore()
+      try {
+        for (let z = 0; z < 4; z++) {
+          if (!tiles[z]) continue
+          ctx.save()
+          ctx.globalAlpha = this.layerAlpha(z)
+          this.drawTile(tiles[z], dx, dy)
+          ctx.restore()
+        }
+        this.drawShadowBits(ctx, mx, my, dx, dy)
+      } finally {
+        this.ctx = originalCtx
       }
-      this.drawShadowBits(ctx, mx, my, dx, dy)
-      this.ctx = originalCtx
     },
 
     drawShadowBits(ctx, mx, my, dx, dy) {
@@ -1419,12 +1669,18 @@ export default {
       ctx.save()
       ctx.globalAlpha = dim ? 0.5 * DIM_ALPHA : 0.5
       ctx.fillStyle = '#000'
-      const w1 = this.tileWidth / 2
-      const h1 = this.tileHeight / 2
+      const dw = this.cacheTw()
+      const dh = this.cacheTh()
+      const hw = Math.ceil(dw / 2)
+      const hh = Math.ceil(dh / 2)
+      const rects = [
+        [dx, dy, hw, hh],
+        [dx + dw - hw, dy, hw, hh],
+        [dx, dy + dh - hh, hw, hh],
+        [dx + dw - hw, dy + dh - hh, hw, hh],
+      ]
       for (let i = 0; i < 4; i++) {
-        if (bits & (1 << i)) {
-          ctx.fillRect(dx + (i % 2) * w1, dy + Math.floor(i / 2) * h1, w1, h1)
-        }
+        if (bits & (1 << i)) ctx.fillRect(rects[i][0], rects[i][1], rects[i][2], rects[i][3])
       }
       ctx.restore()
     },
@@ -1437,27 +1693,31 @@ export default {
 
     drawNormalTile(tileId, dx, dy) {
       const tileset = this.tilesets[this.currentMapData.tilesetId]
-      if (!tileset) return
+      if (!tileset || !this.ctx) return
       let setNumber = 0
       if (isTileA5(tileId)) setNumber = 4
       else setNumber = 5 + Math.floor(tileId / 256)
-      const w = this.tileWidth
-      const h = this.tileHeight
-      const sx = (Math.floor(tileId / 128) % 2 * 8 + tileId % 8) * w
-      const sy = (Math.floor(tileId % 256 / 8) % 16) * h
+      // 源图始终按 48 取样，目标可按缓存缩放
+      const sw = this.tileWidth
+      const sh = this.tileHeight
+      const dw = this.cacheTw()
+      const dh = this.cacheTh()
+      const sx = (Math.floor(tileId / 128) % 2 * 8 + tileId % 8) * sw
+      const sy = (Math.floor(tileId % 256 / 8) % 16) * sh
       const tilesetName = tileset.tilesetNames[setNumber]
       if (!tilesetName) return
       const img = this.tilesetImages[tilesetName]
       if (!img || !img.complete) return
-      if (sx >= 0 && sy >= 0 && sx + w <= img.width && sy + h <= img.height) {
-        this.ctx.drawImage(img, sx, sy, w, h, dx, dy, w, h)
+      if (sx >= 0 && sy >= 0 && sx + sw <= img.width && sy + sh <= img.height) {
+        this.ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh)
       }
     },
 
     drawAutotile(tileId, dx, dy) {
       const tileset = this.tilesets[this.currentMapData.tilesetId]
-      if (!tileset) return
-      let autotileTable = this.FLOOR_AUTOTILE_TABLE
+      if (!tileset || !this.ctx) return
+      // 使用模块常量，禁止放进 data() 做响应式（绘制时深层依赖收集会直接卡死）
+      let autotileTable = FLOOR_AUTOTILE_TABLE
       const kind = getAutotileKind(tileId)
       const shape = getAutotileShape(tileId)
       const tx = kind % 8
@@ -1485,7 +1745,7 @@ export default {
           by = ty * 6 + Math.floor(tx / 2) % 2 * 3
           if (kind % 2 !== 0) {
             bx += 6
-            autotileTable = this.WATERFALL_AUTOTILE_TABLE
+            autotileTable = WATERFALL_AUTOTILE_TABLE
           }
         }
       } else if (isTileA2(tileId)) {
@@ -1496,12 +1756,12 @@ export default {
         setNumber = 2
         bx = tx * 2
         by = (ty - 6) * 2
-        autotileTable = this.WALL_AUTOTILE_TABLE
+        autotileTable = WALL_AUTOTILE_TABLE
       } else if (isTileA4(tileId)) {
         setNumber = 3
         bx = tx * 2
         by = Math.floor((ty - 10) * 2.5 + (ty % 2 === 1 ? 0.5 : 0))
-        if (ty % 2 === 1) autotileTable = this.WALL_AUTOTILE_TABLE
+        if (ty % 2 === 1) autotileTable = WALL_AUTOTILE_TABLE
       }
 
       const table = autotileTable[shape]
@@ -1509,25 +1769,37 @@ export default {
       if (!tilesetName) return
       const source = this.tilesetImages[tilesetName]
       if (!table || !source || !source.complete) return
-      const w1 = this.tileWidth / 2
-      const h1 = this.tileHeight / 2
+      const sw1 = this.tileWidth / 2
+      const sh1 = this.tileHeight / 2
+      const dw = this.cacheTw()
+      const dh = this.cacheTh()
+      const hw = Math.ceil(dw / 2)
+      const hh = Math.ceil(dh / 2)
+      const rects = [
+        [dx, dy, hw, hh],
+        [dx + dw - hw, dy, hw, hh],
+        [dx, dy + dh - hh, hw, hh],
+        [dx + dw - hw, dy + dh - hh, hw, hh],
+      ]
       for (let i = 0; i < 4; i++) {
         const qsx = table[i][0]
         const qsy = table[i][1]
-        const sx1 = (bx * 2 + qsx) * w1
-        const sy1 = (by * 2 + qsy) * h1
-        const dx1 = dx + (i % 2) * w1
-        const dy1 = dy + Math.floor(i / 2) * h1
-        if (sx1 >= 0 && sy1 >= 0 && sx1 + w1 <= source.width && sy1 + h1 <= source.height) {
-          this.ctx.drawImage(source, sx1, sy1, w1, h1, dx1, dy1, w1, h1)
+        const sx1 = (bx * 2 + qsx) * sw1
+        const sy1 = (by * 2 + qsy) * sh1
+        const r = rects[i]
+        if (sx1 >= 0 && sy1 >= 0 && sx1 + sw1 <= source.width && sy1 + sh1 <= source.height) {
+          this.ctx.drawImage(source, sx1, sy1, sw1, sh1, r[0], r[1], r[2], r[3])
         }
       }
     },
 
     renderRegionsToCache(ctx) {
+      if (!ctx || !this.currentMapData) return
       const width = this.currentMapData.width
       const height = this.currentMapData.height
-      ctx.font = '20px Arial'
+      const tw = this.cacheTw()
+      const th = this.cacheTh()
+      ctx.font = Math.max(10, Math.round(20 * (tw / this.tileWidth))) + 'px Arial'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       for (let y = 0; y < height; y++) {
@@ -1535,12 +1807,12 @@ export default {
           const regionId = this.readMapData(x, y, 5)
           if (regionId > 0) {
             ctx.fillStyle = 'rgba(255, 0, 0, 0.3)'
-            ctx.fillRect(x * this.tileWidth, y * this.tileHeight, this.tileWidth, this.tileHeight)
+            ctx.fillRect(x * tw, y * th, tw, th)
             ctx.fillStyle = 'white'
             ctx.strokeStyle = 'black'
             ctx.lineWidth = 3
-            const tx = x * this.tileWidth + this.tileWidth / 2
-            const ty = y * this.tileHeight + this.tileHeight / 2
+            const tx = x * tw + tw / 2
+            const ty = y * th + th / 2
             ctx.strokeText(String(regionId), tx, ty)
             ctx.fillText(String(regionId), tx, ty)
           }
@@ -1564,8 +1836,8 @@ export default {
       const sy = row * ch
       if (!(sx >= 0 && sy >= 0 && sx + cw <= img.width && sy + ch <= img.height)) return false
 
-      const tileW = this.tileWidth
-      const tileH = this.tileHeight
+      const tileW = options.tileW || this.tileWidth
+      const tileH = options.tileH || this.tileHeight
       const forceFit = !!options.forceFit
       const useOriginal = !forceFit && this.mapCharOriginalSize
       if (useOriginal) {
@@ -1602,30 +1874,36 @@ export default {
 
     /** 白方框内缘，行走图只画在这里，相当于格子内缩一圈 */
     eventInnerBox(x, y) {
-      const pad = 6
+      const tw = this.cacheTw()
+      const th = this.cacheTh()
+      const pad = Math.max(1, Math.round(6 * (tw / this.tileWidth)))
       return {
         x: x + pad,
         y: y + pad,
-        w: Math.max(1, this.tileWidth - pad * 2),
-        h: Math.max(1, this.tileHeight - pad * 2),
+        w: Math.max(1, tw - pad * 2),
+        h: Math.max(1, th - pad * 2),
       }
     },
 
     drawEventFill(ctx, x, y) {
-      const pad = 3
+      const tw = this.cacheTw()
+      const th = this.cacheTh()
+      const pad = Math.max(1, Math.round(3 * (tw / this.tileWidth)))
       const ui = this.editorUi || {}
       ctx.save()
       ctx.fillStyle = ui.eventFillColor || 'rgba(0,0,0,0.3)'
-      ctx.fillRect(x + pad, y + pad, this.tileWidth - pad * 2, this.tileHeight - pad * 2)
+      ctx.fillRect(x + pad, y + pad, tw - pad * 2, th - pad * 2)
       ctx.restore()
     },
 
     drawEventFrame(ctx, x, y) {
-      const pad = 2
+      const tw = this.cacheTw()
+      const th = this.cacheTh()
+      const pad = Math.max(1, Math.round(2 * (tw / this.tileWidth)))
       const x0 = x + pad + 0.5
       const y0 = y + pad + 0.5
-      const w = this.tileWidth - pad * 2 - 1
-      const h = this.tileHeight - pad * 2 - 1
+      const w = tw - pad * 2 - 1
+      const h = th - pad * 2 - 1
       ctx.save()
       ctx.lineWidth = 1
       ctx.strokeStyle = '#ffffff'
@@ -1634,14 +1912,16 @@ export default {
     },
 
     renderEventsToCache(ctx) {
-      if (!this.currentMapData.events) return
-      ctx.font = '12px Arial'
+      if (!ctx || !this.currentMapData || !this.currentMapData.events) return
+      const tw = this.cacheTw()
+      const th = this.cacheTh()
+      ctx.font = Math.max(9, Math.round(12 * (tw / this.tileWidth))) + 'px Arial'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       this.currentMapData.events.forEach((event) => {
         if (!event) return
-        const x = event.x * this.tileWidth
-        const y = event.y * this.tileHeight
+        const x = event.x * tw
+        const y = event.y * th
         this.drawEventFill(ctx, x, y)
         const page = event.pages && event.pages[0]
         const image = page && page.image
@@ -1649,8 +1929,11 @@ export default {
         if (image && image.tileId > 0) {
           const prev = this.ctx
           this.ctx = ctx
-          this.drawTile(image.tileId, x, y)
-          this.ctx = prev
+          try {
+            this.drawTile(image.tileId, x, y)
+          } finally {
+            this.ctx = prev
+          }
           drew = true
         } else if (image && image.characterName) {
           const img = this.characterImages[image.characterName]
@@ -1661,6 +1944,8 @@ export default {
             }
             drew = this.drawCharacterFrame(ctx, img, drawImage, x, y, {
               frameBox: this.eventInnerBox(x, y),
+              tileW: tw,
+              tileH: th,
             })
           }
         }
@@ -1669,45 +1954,140 @@ export default {
           ctx.strokeStyle = 'black'
           ctx.lineWidth = 2
           const text = `EV${String(event.id).padStart(3, '0')}`
-          const tx = x + this.tileWidth / 2
-          const ty = y + this.tileHeight / 2
+          const tx = x + tw / 2
+          const ty = y + th / 2
           ctx.strokeText(text, tx, ty)
           ctx.fillText(text, tx, ty)
         }
         this.drawEventFrame(ctx, x, y)
         if (this.showHyperlinks && isEventRef(event)) {
-          const bx = x + this.tileWidth - 15
+          const mark = Math.max(8, Math.round(13 * (tw / this.tileWidth)))
+          const bx = x + tw - mark - 2
           const by = y + 2
           ctx.fillStyle = '#409eff'
-          ctx.fillRect(bx, by, 13, 13)
+          ctx.fillRect(bx, by, mark, mark)
           ctx.fillStyle = '#fff'
-          ctx.font = 'bold 10px Arial'
+          ctx.font = `bold ${Math.max(8, mark - 3)}px Arial`
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
-          ctx.fillText('链', bx + 6.5, by + 7)
-          ctx.font = '12px Arial'
+          ctx.fillText('链', bx + mark / 2, by + mark / 2)
+          ctx.font = Math.max(9, Math.round(12 * (tw / this.tileWidth))) + 'px Arial'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
         }
       })
     },
 
-    renderGrid() {
+    renderRegionsInView(ctx, range) {
+      if (!ctx || !range || !this.currentMapData) return
+      const tilesW = range.x1 - range.x0 + 1
+      const tilesH = range.y1 - range.y0 + 1
+      // 缩放过远时区域层逐格绘制会卡死，直接跳过
+      if (tilesW * tilesH > VIEW_BUF_MAX_TILES) return
+      const tw = this.tileWidth
+      const th = this.tileHeight
+      ctx.font = '20px Arial'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      for (let y = range.y0; y <= range.y1; y++) {
+        for (let x = range.x0; x <= range.x1; x++) {
+          const regionId = this.readMapData(x, y, 5)
+          if (!(regionId > 0)) continue
+          ctx.fillStyle = 'rgba(255, 0, 0, 0.3)'
+          ctx.fillRect(x * tw, y * th, tw, th)
+          ctx.fillStyle = 'white'
+          ctx.strokeStyle = 'black'
+          ctx.lineWidth = 3
+          const tx = x * tw + tw / 2
+          const ty = y * th + th / 2
+          ctx.strokeText(String(regionId), tx, ty)
+          ctx.fillText(String(regionId), tx, ty)
+        }
+      }
+    },
+    renderEventsInView(ctx, range) {
+      if (!ctx || !range || !this.currentMapData || !this.currentMapData.events) return
+      const tw = this.tileWidth
+      const th = this.tileHeight
+      ctx.font = '12px Arial'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      this.currentMapData.events.forEach((event) => {
+        if (!event) return
+        if (event.x < range.x0 || event.x > range.x1 || event.y < range.y0 || event.y > range.y1) return
+        const x = event.x * tw
+        const y = event.y * th
+        this.drawEventFill(ctx, x, y)
+        const page = event.pages && event.pages[0]
+        const image = page && page.image
+        let drew = false
+        if (image && image.tileId > 0) {
+          const prev = this.ctx
+          this.ctx = ctx
+          try {
+            this.drawTile(image.tileId, x, y)
+          } finally {
+            this.ctx = prev
+          }
+          drew = true
+        } else if (image && image.characterName) {
+          const img = this.characterImages[image.characterName]
+          if (img) {
+            drew = this.drawCharacterFrame(
+              ctx,
+              img,
+              { ...image, pattern: this.animPatternForPage(page) },
+              x,
+              y,
+              { frameBox: this.eventInnerBox(x, y), tileW: tw, tileH: th }
+            )
+          }
+        }
+        if (!drew) {
+          ctx.fillStyle = 'white'
+          ctx.strokeStyle = 'black'
+          ctx.lineWidth = 2
+          const text = `EV${String(event.id).padStart(3, '0')}`
+          ctx.strokeText(text, x + tw / 2, y + th / 2)
+          ctx.fillText(text, x + tw / 2, y + th / 2)
+        }
+        this.drawEventFrame(ctx, x, y)
+        if (this.showHyperlinks && isEventRef(event)) {
+          const bx = x + tw - 15
+          const by = y + 2
+          ctx.fillStyle = '#409eff'
+          ctx.fillRect(bx, by, 13, 13)
+          ctx.fillStyle = '#fff'
+          ctx.font = 'bold 10px Arial'
+          ctx.fillText('链', bx + 6.5, by + 7)
+          ctx.font = '12px Arial'
+        }
+      })
+    },
+    renderGrid(range) {
       const width = this.currentMapData.width
       const height = this.currentMapData.height
       const ui = this.editorUi || {}
       this.ctx.strokeStyle = ui.gridColor || 'rgba(255, 255, 255, 0.25)'
       this.ctx.lineWidth = Math.max(1, Number(ui.gridWidth) || 1)
-      for (let x = 0; x <= width; x++) {
+      const x0 = range ? range.x0 : 0
+      const y0 = range ? range.y0 : 0
+      const x1 = range ? range.x1 + 1 : width
+      const y1 = range ? range.y1 + 1 : height
+      const cols = x1 - x0
+      const rows = y1 - y0
+      // 缩放过远时网格线过多，按步进抽稀
+      const step = Math.max(1, Math.ceil(Math.max(cols, rows) / 256))
+      for (let x = x0; x <= x1; x += step) {
         this.ctx.beginPath()
-        this.ctx.moveTo(x * this.tileWidth, 0)
-        this.ctx.lineTo(x * this.tileWidth, height * this.tileHeight)
+        this.ctx.moveTo(x * this.tileWidth, y0 * this.tileHeight)
+        this.ctx.lineTo(x * this.tileWidth, y1 * this.tileHeight)
         this.ctx.stroke()
       }
-      for (let y = 0; y <= height; y++) {
+      for (let y = y0; y <= y1; y += step) {
         this.ctx.beginPath()
-        this.ctx.moveTo(0, y * this.tileHeight)
-        this.ctx.lineTo(width * this.tileWidth, y * this.tileHeight)
+        this.ctx.moveTo(x0 * this.tileWidth, y * this.tileHeight)
+        this.ctx.lineTo(x1 * this.tileWidth, y * this.tileHeight)
         this.ctx.stroke()
       }
     },
@@ -1818,32 +2198,143 @@ export default {
       this.renderStartMarker('player', this.startMarkers.player, 'S', 'rgba(255,64,64,0.35)', '#ff3030')
     },
 
+    /** 按屏幕像素逐格铺满，四块自动图块互相压 1 像素，避免缩放后中间裂开一条十字缝 */
+    paintVisibleTiles(range) {
+      if (!range || !this.currentMapData || !this.ctx) return
+      const z = this.zoom
+      const tw = this.tileWidth
+      const th = this.tileHeight
+      const prevTw = this._bufTw
+      const prevTh = this._bufTh
+      this.ctx.imageSmoothingEnabled = z < 0.999
+      try {
+        for (let y = range.y0; y <= range.y1; y++) {
+          const y0 = Math.round(this.offsetY + y * th * z)
+          const y1 = Math.round(this.offsetY + (y + 1) * th * z)
+          const dh = Math.max(1, y1 - y0)
+          for (let x = range.x0; x <= range.x1; x++) {
+            const x0 = Math.round(this.offsetX + x * tw * z)
+            const x1 = Math.round(this.offsetX + (x + 1) * tw * z)
+            const dw = Math.max(1, x1 - x0)
+            this._bufTw = dw
+            this._bufTh = dh
+            this.paintTileToContext(this.ctx, x, y, 0, 0, x0, y0)
+          }
+        }
+      } finally {
+        this._bufTw = prevTw
+        this._bufTh = prevTh
+      }
+    },
+
+    tryBlitFocusBase() {
+      const ring = this._focusRing
+      const base = this._focusBase
+      if (!ring || !ring.active || !base || !base.canvas) return false
+      if (base.mapId !== this.mapId || base.zoom !== this.zoom) return false
+      if (base.ox !== this.offsetX || base.oy !== this.offsetY) return false
+      if (base.w !== this.canvas.width || base.h !== this.canvas.height) return false
+      this.ctx.setTransform(1, 0, 0, 1, 0, 0)
+      this.ctx.drawImage(base.canvas, 0, 0)
+      return true
+    },
+
+    captureFocusBase() {
+      const ring = this._focusRing
+      if (!ring || !ring.active || !this.canvas) return
+      if (!this._focusBase) this._focusBase = { canvas: document.createElement('canvas') }
+      const base = this._focusBase
+      const c = base.canvas
+      if (c.width !== this.canvas.width || c.height !== this.canvas.height) {
+        c.width = this.canvas.width
+        c.height = this.canvas.height
+      }
+      const ctx = c.getContext('2d')
+      if (!ctx) return
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.drawImage(this.canvas, 0, 0)
+      base.w = this.canvas.width
+      base.h = this.canvas.height
+      base.zoom = this.zoom
+      base.ox = this.offsetX
+      base.oy = this.offsetY
+      base.mapId = this.mapId
+    },
+
+    captureSnap() {
+      const src = this.canvas
+      if (!src || src.width < 2 || src.height < 2) return
+      if (!this._snap) this._snap = document.createElement('canvas')
+      if (this._snap.width !== src.width || this._snap.height !== src.height) {
+        this._snap.width = src.width
+        this._snap.height = src.height
+      }
+      const ctx = this._snap.getContext('2d')
+      if (!ctx) return
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.drawImage(src, 0, 0)
+      this._snapOffsetX = this.offsetX
+      this._snapOffsetY = this.offsetY
+      this._snapZoom = this.zoom
+    },
+
+    tryBlitShift() {
+      const snap = this._snap
+      if (!this._useShift || !snap || this._snapZoom !== this.zoom) return false
+      if (snap.width !== this.canvas.width || snap.height !== this.canvas.height) return false
+      this.ctx.setTransform(1, 0, 0, 1, 0, 0)
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+      this.paintViewportBackground()
+      this.ctx.drawImage(snap, this.offsetX - this._snapOffsetX, this.offsetY - this._snapOffsetY)
+      return true
+    },
+
+    settlePaint() {
+      if (this._settleTimer) clearTimeout(this._settleTimer)
+      this._settleTimer = setTimeout(() => {
+        this._settleTimer = 0
+        if (this.isPanning || this._coasting) return
+        this._useShift = false
+        this.render()
+      }, 80)
+    },
+
     render() {
       if (!this.canvas || !this.ctx) return
       // 防止 ResizeObserver / 设置回写 与 RAF 重入同一帧渲染
       if (this._rendering) return
       this._rendering = true
       try {
+        if (this.tryBlitFocusBase()) {
+          this.renderFocusRing()
+          return
+        }
+        if (this.tryBlitShift()) return
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0)
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
         this.paintViewportBackground()
-        if (!this.currentMapData || !this.mapCache) return
+        if (!this.currentMapData) return
+        const range = this.visibleTileRange(1)
+        this.paintVisibleTiles(range)
         this.ctx.save()
         this.ctx.translate(this.offsetX, this.offsetY)
         this.ctx.scale(this.zoom, this.zoom)
-        this.ctx.drawImage(this.mapCache, 0, 0)
-        if (this.showRegions && this.regionsCache) this.ctx.drawImage(this.regionsCache, 0, 0)
-        if (this.effectiveShowEvents && this.eventsCache) {
-          this.ctx.save()
-          if (!this.isEventMode) this.ctx.globalAlpha = 0.4
-          this.ctx.drawImage(this.eventsCache, 0, 0)
-          this.ctx.restore()
+        if (range) {
+          if (this.showRegions) this.renderRegionsInView(this.ctx, range)
+          if (this.effectiveShowEvents) {
+            this.ctx.save()
+            if (!this.isEventMode) this.ctx.globalAlpha = 0.4
+            this.renderEventsInView(this.ctx, range)
+            this.ctx.restore()
+          }
         }
-        if (this.effectiveShowGrid) this.renderGrid()
+        if (this.effectiveShowGrid) this.renderGrid(range)
         this.renderMapEdge()
         this.renderStartPosition()
         this.renderSelectedTile()
         this.ctx.restore()
         this.renderShapePreview()
+        this.captureFocusBase()
         this.renderFocusRing()
       } catch (e) {
         console.error(e)
@@ -1857,10 +2348,10 @@ export default {
       if (!ring || !ring.active || !this.canvas || !this.ctx) return
       const ev = this.getEventById(ring.eventId)
       if (!ev) return
-      const elapsed = Date.now() - ring.start
-      // 反复收缩：每个周期从视口外缘收到目标格
-      const t = (elapsed % FOCUS_RING_CYCLE_MS) / FOCUS_RING_CYCLE_MS
+      const t = this.focusRingSample(ring)
+      if (t == null) return
       const ease = t * t * (3 - 2 * t)
+      const elapsed = Date.now() - ring.start
       const vw = this.canvas.width
       const vh = this.canvas.height
       if (vw < 2 || vh < 2) return
@@ -2466,10 +2957,12 @@ export default {
     onHScroll() {
       if (this.syncingScroll || !this.currentMapData || !this.canvas) return
       const m = this.scrollMetrics
-      if (!m.showH) return
+      if (!m.showH || !m.hMax) return
       this.clearFocusRing()
       this.syncingScroll = true
-      this.offsetX = -this.$refs.hScroll.scrollLeft
+      const track = m.track || SCROLL_TRACK
+      const ratio = Math.max(0, Math.min(1, (this.$refs.hScroll.scrollLeft || 0) / track))
+      this.offsetX = -ratio * m.hMax
       this.velocityX = 0
       this.velocityY = 0
       this.render()
@@ -2479,10 +2972,12 @@ export default {
     onVScroll() {
       if (this.syncingScroll || !this.currentMapData || !this.canvas) return
       const m = this.scrollMetrics
-      if (!m.showV) return
+      if (!m.showV || !m.vMax) return
       this.clearFocusRing()
       this.syncingScroll = true
-      this.offsetY = -this.$refs.vScroll.scrollTop
+      const track = m.track || SCROLL_TRACK
+      const ratio = Math.max(0, Math.min(1, (this.$refs.vScroll.scrollTop || 0) / track))
+      this.offsetY = -ratio * m.vMax
       this.velocityX = 0
       this.velocityY = 0
       this.render()
@@ -2498,10 +2993,23 @@ export default {
       this.emitZoom()
     },
 
-    /** 将整张地图缩放到视口内并居中 */
-    fitToView() {
+    /** 计算安全缩放：尽量 fit，但可见格不超过 FIT_MAX_VISIBLE_TILES */
+    safeFitZoom(mapW, mapH, vw, vh) {
+      let z = Math.min(5, Math.max(0.05, Math.min(vw / mapW, vh / mapH)))
+      if (!Number.isFinite(z) || z <= 0) z = 0.1
+      const tw = this.tileWidth
+      const th = this.tileHeight
+      // (vw/(tw*z))*(vh/(th*z)) <= FIT_MAX_VISIBLE_TILES  →  z >= sqrt(...)
+      const zFloor = Math.sqrt((vw * vh) / (tw * th * FIT_MAX_VISIBLE_TILES))
+      if (Number.isFinite(zFloor) && zFloor > z) z = zFloor
+      return Math.min(5, Math.max(0.05, z))
+    },
+
+    /** 将整张地图缩放到视口内并居中（超大地图只缩到安全可见格上限） */
+    fitToView(opts = {}) {
+      const doRender = !opts || opts.render !== false
       if (!this.currentMapData || !this.canvas) {
-        this.resetView()
+        if (doRender) this.resetView()
         return
       }
       const mapW = this.currentMapData.width * this.tileWidth
@@ -2509,27 +3017,27 @@ export default {
       const pad = 16
       const vw = Math.max(1, this.canvas.width - pad * 2)
       const vh = Math.max(1, this.canvas.height - pad * 2)
-      const z = Math.min(5, Math.max(0.1, Math.min(vw / mapW, vh / mapH)))
+      const z = this.safeFitZoom(mapW, mapH, vw, vh)
       this.zoom = z
       this.offsetX = (this.canvas.width - mapW * z) / 2
       this.offsetY = (this.canvas.height - mapH * z) / 2
       this.velocityX = 0
       this.velocityY = 0
       this.bumpScroll()
-      this.render()
       this.emitZoom()
+      if (doRender) this.render()
     },
 
     startInertia() {
       const friction = 0.95
       const threshold = 0.1
       const animate = () => {
-        if (
+        const moving =
           !this.isDragging &&
           !this.isPanning &&
           !this.draggingEventId &&
           (Math.abs(this.velocityX) > threshold || Math.abs(this.velocityY) > threshold)
-        ) {
+        if (moving) {
           this.offsetX += this.velocityX
           this.offsetY += this.velocityY
           this.clampOffset()
