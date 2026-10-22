@@ -1,0 +1,110 @@
+/* shared spirit panel layout / form */
+.spirit-layout {
+  display: flex;
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  gap: 0;
+}
+.spirit-side {
+  width: 240px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--app-border);
+  background: var(--app-surface-2);
+  padding: 8px;
+  overflow: auto;
+}
+.side-title {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 6px 8px 4px;
+  color: var(--app-text, inherit);
+}
+.side-hint {
+  margin: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #909399);
+  line-height: 1.5;
+}
+.list-panel { margin-top: 8px; }
+.list-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.item-ul { list-style: none; margin: 0; padding: 0; }
+.item-ul li {
+  padding: 8px 10px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+  outline: none;
+}
+.item-ul li:hover,
+.item-ul li.active {
+  background: var(--app-hover-bg);
+  color: var(--app-active-color);
+}
+.item-ul li:focus {
+  box-shadow: inset 0 0 0 1px var(--app-active-color);
+}
+.spirit-main {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 16px;
+  background: var(--app-surface);
+  min-width: 0;
+}
+.spirit-form { max-width: none; }
+.spirit-form.dense .form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 16px;
+  row-gap: 2px;
+  align-items: start;
+}
+.spirit-form.dense .form-grid > .el-form-item { margin-bottom: 12px; }
+.spirit-form.dense .form-grid > .full { grid-column: 1 / -1; }
+.spirit-form.dense .form-grid > .span-2 { grid-column: span 2; }
+.spirit-form.dense .ctrl-full { width: 100%; }
+.spirit-form.dense :deep(.el-input-number.ctrl-full) { width: 100%; }
+.spirit-form.dense :deep(.el-select.ctrl-full) { width: 100%; }
+.form-grid.is-disabled { opacity: 0.45; pointer-events: none; }
+.trail-lib-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #909399);
+}
+.ctrl-with-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.ctrl-with-btn .ctrl-full { flex: 1; min-width: 0; }
+@media (max-width: 1100px) {
+  .spirit-form.dense .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.q-tag { margin-left: 4px; opacity: 0.85; font-size: 12px; }
+.q-opt { display: inline-flex; align-items: center; gap: 8px; }
+.q-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  box-sizing: border-box;
+}
+.q-dot.is-normal {
+  border-color: #909399;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+.menu-action-row { display: flex; gap: 8px; margin-bottom: 8px; }
+.color-hex {
+  margin-left: 10px;
+  font-size: 13px;
+  color: var(--app-text-muted);
+  vertical-align: middle;
+}
