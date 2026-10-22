@@ -30,6 +30,7 @@ import {
   drawEventFill,
   drawEventFrame,
 } from '@/utils/mapTilePaint'
+import { getEventDisplayPage } from './eventRef'
 
 function frameYield() {
   return new Promise((r) => requestAnimationFrame(() => r()))
@@ -58,13 +59,18 @@ export default {
     }
   },
   computed: {
-    ...mapGetters(['editorUi', 'mapCharOriginalSize']),
+    ...mapGetters(['editorUi', 'mapCharOriginalSize', 'showHyperlinks', 'showHyperlinkImages']),
+    useHyperlinkImages() {
+      return !!(this.showHyperlinks && this.showHyperlinkImages)
+    },
     eventStyle() {
       const ui = this.editorUi || {}
       return {
         fillColor: ui.eventFillColor || 'rgba(0,0,0,0.3)',
         largeFit: ui.eventLargeFit === 'fit' ? 'fit' : 'center',
         originalSize: !!this.mapCharOriginalSize,
+        useHyperlinkImages: this.useHyperlinkImages,
+        showHyperlinkMark: !!this.showHyperlinks,
       }
     },
   },
@@ -83,6 +89,12 @@ export default {
     },
     showEvents() {
       this.requestPaint()
+    },
+    showHyperlinks() {
+      this.onHyperlinkDisplayChange()
+    },
+    showHyperlinkImages() {
+      this.onHyperlinkDisplayChange()
     },
     eventStyle: {
       deep: true,
@@ -264,14 +276,23 @@ export default {
         this.requestPaint()
       }
     },
+    onHyperlinkDisplayChange() {
+      if (this.showEvents && this._map) {
+        this.preloadChars(this._token)
+      } else {
+        this.requestPaint()
+      }
+    },
     async preloadChars(token) {
       const map = this._map
       if (!map) return
       const names = new Set()
+      const useTpl = this.useHyperlinkImages
       if (this.showEvents) {
         ;(map.events || []).forEach((ev) => {
           if (!ev) return
-          const img = ev.pages && ev.pages[0] && ev.pages[0].image
+          const page = getEventDisplayPage(ev, useTpl)
+          const img = page && page.image
           if (img && img.characterName) names.add(img.characterName)
         })
       }
@@ -333,9 +354,11 @@ export default {
       const map = this._map
       if (!map) return
       const style = this.eventStyle
+      const useTpl = this.useHyperlinkImages
       ;(map.events || []).forEach((ev) => {
         if (!ev || !ev.id) return
-        const image = ev.pages && ev.pages[0] && ev.pages[0].image
+        const page = getEventDisplayPage(ev, useTpl)
+        const image = page && page.image
         const img = image && image.characterName ? this._charImgs[image.characterName] : null
         drawMapEventMarker(ctx, ev, img, style)
       })

@@ -48,7 +48,9 @@ class ShortcutManager {
     }
 
     static delete() {
-        this.vueInstance && this.vueInstance.$emit('$onDelete');
+        if (!this.isListItemFocused()) return;
+        const vm = this.vueInstance;
+        if (vm && typeof vm.$onDelete === 'function') vm.$onDelete();
     }
 
     static copy() {
@@ -60,11 +62,15 @@ class ShortcutManager {
     }
 
     static pressUp() {
-        console.log('press up');
+        if (!this.isListItemFocused()) return;
+        const vm = this.vueInstance;
+        if (vm && typeof vm.$prevItem === 'function') vm.$prevItem();
     }
 
     static pressDown() {
-        console.log('press down');
+        if (!this.isListItemFocused()) return;
+        const vm = this.vueInstance;
+        if (vm && typeof vm.$nextItem === 'function') vm.$nextItem();
     }
 
 }

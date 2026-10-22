@@ -102,6 +102,7 @@ export const CONTEXTMENU_SLOT = {
     $onSave() {
     },
     $onDelete() {
+      this.$clearItem()
     },
     $onCopy() {
       this.$clipboard.set(JSON.stringify({ dataType: this.meta.dataType, data: this.currentItem }));
@@ -186,7 +187,10 @@ export const CONTEXTMENU_SLOT = {
       } else {
         document.body.removeEventListener('click', this.closeMenu)
       }
-    }
+    },
+    changed(v) {
+      this.$emit('dirty-change', !!v)
+    },
   },
 }
 

@@ -61,6 +61,7 @@
             <el-input-number v-model="pan" :min="-100" :max="100" size="small" controls-position="right" />
           </div>
         </db-group-box>
+        <el-button size="small" class="audio-reset" @click="resetParams">重置音量/音调/声像</el-button>
       </div>
     </div>
     <template #footer>
@@ -217,6 +218,11 @@ export default {
     }
   },
   methods: {
+    resetParams() {
+      this.volume = 90
+      this.pitch = 100
+      this.pan = 0
+    },
     onVisible(v) {
       this.$emit('update:modelValue', v)
       if (!v) this.stopPlayback()
@@ -645,5 +651,8 @@ export default {
 .unit {
   font-size: 13px;
   color: var(--el-text-color-regular);
+}
+.audio-reset {
+  margin-top: 4px;
 }
 </style>

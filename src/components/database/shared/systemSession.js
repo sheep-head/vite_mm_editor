@@ -48,6 +48,14 @@ export function ensureSystemShape(data) {
   if (!Array.isArray(data.attackMotions)) data.attackMotions = []
   if (!Array.isArray(data.sounds)) data.sounds = []
   if (!Array.isArray(data.windowTone)) data.windowTone = [0, 0, 0, 0]
+  if (data.optKeyItemsNumber == null) data.optKeyItemsNumber = false
+  if (!data.titleCommandWindow || typeof data.titleCommandWindow !== 'object') {
+    data.titleCommandWindow = { background: 0, offsetX: 0, offsetY: 0 }
+  } else {
+    if (data.titleCommandWindow.background == null) data.titleCommandWindow.background = 0
+    if (data.titleCommandWindow.offsetX == null) data.titleCommandWindow.offsetX = 0
+    if (data.titleCommandWindow.offsetY == null) data.titleCommandWindow.offsetY = 0
+  }
   for (const v of ['boat', 'ship', 'airship']) {
     if (!data[v] || typeof data[v] !== 'object') {
       data[v] = {

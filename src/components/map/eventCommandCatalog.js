@@ -371,7 +371,7 @@ export const COMMAND_CATALOG = [
     label: '闪烁画面...',
     needsDialog: true,
     paramKey: 'Cmd224Flash',
-    createDefault: def(224, [[255, 255, 255, 255], 60, true]),
+    createDefault: def(224, [[255, 255, 255, 170], 60, true]),
   },
   {
     code: 225,
@@ -389,7 +389,7 @@ export const COMMAND_CATALOG = [
     label: '设置天气...',
     needsDialog: true,
     paramKey: 'Cmd236Weather',
-    createDefault: def(236, ['none', 0, 0, false]),
+    createDefault: def(236, ['none', 5, 60, true]),
   },
   {
     code: 241,
@@ -573,7 +573,17 @@ export const COMMAND_CATALOG = [
     label: '插件指令...',
     needsDialog: true,
     paramKey: 'Cmd357Plugin',
-    createDefault: def(357, ['', '', '']),
+    createDefault: def(357, ['', '', '', {}]),
+  },
+  // 仅用于编辑已有 MV 插件指令，不进入指令选择页（page 置空）
+  {
+    code: 356,
+    page: null,
+    group: '高级',
+    label: '插件指令(MV)',
+    needsDialog: true,
+    paramKey: 'Cmd356Plugin',
+    createDefault: def(356, ['']),
   },
 ]
 

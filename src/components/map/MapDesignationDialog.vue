@@ -9,10 +9,20 @@
     destroy-on-close
     :close-on-click-modal="false"
     @update:model-value="$emit('update:modelValue', $event)">
-    <div class="md">
+    <div class="md" :class="{ 'no-preview': !hasPreview }">
       <aside class="md-list">
         <el-input v-model="query" size="small" clearable placeholder="筛选地图" />
         <div ref="rows" class="md-rows">
+          <div
+            v-if="allowNone"
+            class="md-row"
+            :class="{ on: localMapId === 0 }"
+            data-map-id="0"
+            @click="selectNone">
+            <span class="twist" />
+            <span class="id">—</span>
+            <span class="name">(无)</span>
+          </div>
           <div
             v-for="row in visibleRows"
             :key="row.id"
@@ -32,24 +42,27 @@
         </div>
       </aside>
       <div class="md-preview">
-        <div class="md-bar">
-          <span>地图 {{ localMapId }} · ({{ localX }}, {{ localY }})</span>
-          <el-checkbox v-model="showEvents" size="small">显示事件</el-checkbox>
-        </div>
-        <div class="md-preview-body">
-          <map-preview-canvas
-            ref="preview"
-            :map-id="localMapId"
-            :selected-x="localX"
-            :selected-y="localY"
-            :show-events="showEvents"
-            @pick="onPick" />
-        </div>
+        <template v-if="hasPreview">
+          <div class="md-bar">
+            <span>地图 {{ localMapId }} · ({{ localX }}, {{ localY }})</span>
+            <el-checkbox v-model="showEvents" size="small">显示事件</el-checkbox>
+          </div>
+          <div class="md-preview-body">
+            <map-preview-canvas
+              ref="preview"
+              :map-id="localMapId"
+              :selected-x="localX"
+              :selected-y="localY"
+              :show-events="showEvents"
+              @pick="onPick" />
+          </div>
+        </template>
+        <div v-else class="md-empty">请从左侧选择地图</div>
       </div>
     </div>
     <template #footer>
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
-      <el-button type="primary" @click="confirm">确定</el-button>
+      <el-button type="primary" :disabled="!canConfirm" @click="confirm">确定</el-button>
     </template>
   </el-dialog>
 </template>
@@ -66,6 +79,8 @@ export default {
     mapId: { type: Number, default: 1 },
     x: { type: Number, default: 0 },
     y: { type: Number, default: 0 },
+    /** 允许选「无」(mapId=0)，用于载具初始位置 */
+    allowNone: { type: Boolean, default: false },
   },
   emits: ['update:modelValue', 'confirm'],
   data() {
@@ -74,13 +89,21 @@ export default {
       tree: [],
       infos: [],
       expanded: {},
-      localMapId: 1,
+      localMapId: 0,
       localX: 0,
       localY: 0,
       showEvents: true,
+      pickedMap: false,
     }
   },
   computed: {
+    hasPreview() {
+      return this.localMapId > 0
+    },
+    canConfirm() {
+      if (this.allowNone && this.localMapId === 0) return true
+      return this.localMapId > 0
+    },
     visibleRows() {
       const q = (this.query || '').trim().toLowerCase()
       const out = []
@@ -113,9 +136,11 @@ export default {
       immediate: true,
       handler(v) {
         if (!v) return
-        this.localMapId = this.mapId || 1
+        const mid = Number(this.mapId) || 0
+        this.localMapId = mid
         this.localX = Math.max(0, this.x || 0)
         this.localY = Math.max(0, this.y || 0)
+        this.pickedMap = mid > 0
         this.loadMaps()
       },
     },
@@ -150,12 +175,14 @@ export default {
       infos.forEach((m) => {
         if (m && m.id && m.expanded) expanded[m.id] = true
       })
-      let cur = infos[this.localMapId]
-      const guard = new Set()
-      while (cur && cur.parentId && !guard.has(cur.id)) {
-        guard.add(cur.id)
-        expanded[cur.parentId] = true
-        cur = infos[cur.parentId]
+      if (this.localMapId > 0) {
+        let cur = infos[this.localMapId]
+        const guard = new Set()
+        while (cur && cur.parentId && !guard.has(cur.id)) {
+          guard.add(cur.id)
+          expanded[cur.parentId] = true
+          cur = infos[cur.parentId]
+        }
       }
       this.expanded = expanded
       this.$nextTick(() => this.scrollToSelected())
@@ -169,18 +196,31 @@ export default {
     toggle(id) {
       this.expanded = { ...this.expanded, [id]: !this.expanded[id] }
     },
+    selectNone() {
+      this.localMapId = 0
+      this.localX = 0
+      this.localY = 0
+      this.pickedMap = false
+    },
     selectMap(id) {
-      this.localMapId = id
+      const next = Number(id) || 0
+      if (next !== this.localMapId) {
+        this.localX = 0
+        this.localY = 0
+      }
+      this.localMapId = next
+      this.pickedMap = next > 0
     },
     onPick({ x, y }) {
       this.localX = x
       this.localY = y
     },
     confirm() {
+      if (!this.canConfirm) return
       this.$emit('confirm', {
-        mapId: this.localMapId,
-        x: this.localX,
-        y: this.localY,
+        mapId: this.localMapId || 0,
+        x: this.localMapId ? this.localX : 0,
+        y: this.localMapId ? this.localY : 0,
       })
       this.$emit('update:modelValue', false)
     },
@@ -198,6 +238,9 @@ export default {
   max-height: calc(100vh - 168px);
   min-height: 0;
   overflow: hidden;
+}
+.md.no-preview {
+  grid-template-columns: 320px minmax(0, 1fr);
 }
 .md-list {
   display: flex;
@@ -257,6 +300,8 @@ export default {
   min-height: 0;
   height: 100%;
   overflow: hidden;
+  border: 1px solid var(--app-border, #ddd);
+  background: #fafafa;
 }
 .md-preview-body {
   flex: 1 1 auto;
@@ -268,9 +313,17 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 6px;
+  margin: 6px 8px;
   font-size: 12px;
   flex-shrink: 0;
+}
+.md-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--app-text-muted, #909399);
+  font-size: 14px;
 }
 .md-preview-body :deep(.mpc) {
   width: 100%;

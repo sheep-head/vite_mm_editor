@@ -144,7 +144,8 @@
       :ref-mode="editorRefMode"
       @confirm="onEditorConfirm"
       @apply="onEditorApply"
-      @jump-to-ref="onJumpToRef" />
+      @jump-to-ref="onJumpToRef"
+      @view-ref="onViewRef" />
 
     <database-dialog
       :model-value="databaseVisible"
@@ -208,11 +209,7 @@ import MapToolsPanel from '@/components/map/MapToolsPanel.vue'
 import TilePalette from '@/components/map/TilePalette.vue'
 import MapSettingsDialog from '@/components/map/MapSettingsDialog.vue'
 import { createEmptyEvent, nextEventId } from '@/components/map/eventDefaults'
-import {
-  parseEventRef,
-  loadTemplateEvent,
-  REF_TEMPLATE_MAP_ID,
-} from '@/components/map/eventRef'
+import { loadTemplateEvent, REF_TEMPLATE_MAP_ID } from '@/components/map/eventRef'
 import {
   pushHistory,
   undo as historyUndo,
@@ -468,7 +465,6 @@ export default {
       'selectedMapId',
       'paletteTab',
       'databaseVisible',
-      'showHyperlinks',
       'editorUi',
     ]),
     blockedMapIds() {
@@ -1123,20 +1119,21 @@ export default {
       const ev = v && v.getEventById(id)
       if (!ev) return
       this._pendingCreate = false
-      if (this.showHyperlinks) {
-        const refId = parseEventRef(ev)
-        if (refId != null) {
-          const template = loadTemplateEvent(refId)
-          if (template) {
-            this.editingEvent = template
-            this.editorRefMode = { mapId: REF_TEMPLATE_MAP_ID, refId }
-            this.editorVisible = true
-            return
-          }
-        }
-      }
+      // 始终打开本地事件（含超链接桩），模板改由编辑器内「查看模板」进入
       this.editorRefMode = null
       this.editingEvent = JSON.parse(JSON.stringify(ev))
+      this.editorVisible = true
+    },
+    onViewRef(refId) {
+      const n = Number(refId) || 0
+      if (!n) return
+      const template = loadTemplateEvent(n)
+      if (!template) {
+        ElMessage.warning(`Map${String(REF_TEMPLATE_MAP_ID).padStart(3, '0')} 上找不到 EV${String(n).padStart(3, '0')}`)
+        return
+      }
+      this.editingEvent = template
+      this.editorRefMode = { mapId: REF_TEMPLATE_MAP_ID, refId: n }
       this.editorVisible = true
     },
     onJumpToRef() {

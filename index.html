@@ -38,20 +38,53 @@
     /* NW.js 窗口初始化，非 NW.js 环境自动跳过 */
     if (window.nwRequire) {
       var win = window.nwRequire('nw.gui').Window.get();
+      var VITE_DEV_PORT = 5288;
+
+      function killViteDevServer(port) {
+        try {
+          var execSync = window.nwRequire('child_process').execSync;
+          var out = '';
+          try {
+            out = execSync('netstat -ano', { encoding: 'utf8' });
+          } catch (e) {
+            out = '';
+          }
+          var pids = {};
+          var needle = ':' + port;
+          String(out).split(/\r?\n/).forEach(function (line) {
+            if (line.indexOf(needle) < 0) return;
+            if (!/\bLISTENING\b/i.test(line)) return;
+            var parts = line.trim().split(/\s+/);
+            var pid = parts[parts.length - 1];
+            if (/^\d+$/.test(pid) && pid !== '0') pids[pid] = true;
+          });
+          Object.keys(pids).forEach(function (pid) {
+            try {
+              execSync('taskkill /PID ' + pid + ' /T /F', { stdio: 'ignore' });
+            } catch (e) {}
+          });
+          // 顺带清掉 start-nw.bat 起的最小化 vite 控制台（若还在）
+          try {
+            execSync('taskkill /FI "WINDOWTITLE eq vite-mm-editor-vite*" /T /F', { stdio: 'ignore' });
+          } catch (e) {}
+        } catch (e) {
+          console.warn('kill vite failed', e);
+        }
+      }
+
+      win.on('close', function () {
+        var ok = window.confirm(
+          '是否完全退出编辑器？\n\n选「是」：先关闭 Vite（端口 ' +
+            VITE_DEV_PORT +
+            '），再退出本窗口。\n选「否」：取消关闭。'
+        );
+        if (!ok) return;
+        killViteDevServer(VITE_DEV_PORT);
+        this.close(true);
+      });
+
       win.maximize();
       win.showDevTools();
-      /*var menuBar = new nw.Menu({ type: 'menubar' });
-      var fileMenu = new nw.MenuItem({ label: "一级菜单" });
-
-      var fileMenuColl = new nw.Menu();
-      fileMenu.submenu = fileMenuColl;
-      var openMenu = new nw.MenuItem({ label: "二级菜单" });
-      fileMenuColl.append(openMenu);
-
-      menuBar.append(fileMenu);//关键，放在最后没问题，正常！
-
-      win.menu = menuBar;*/
-      // location.href = "https://ytmetalmax.cn/";
     }
   </script>
 </head>

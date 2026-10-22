@@ -33,6 +33,7 @@
             @dblclick="confirm" />
         </div>
         <div class="sheet-meta">
+          <span v-if="imageSizeText" class="sheet-size">{{ imageSizeText }}</span>
           <span v-if="tileMode">图块 {{ tileLabel }}</span>
           <span v-else-if="frameMode">{{ frameLabel }}</span>
           <span v-else-if="maxIndex > 0">索引 {{ selectedIndex }} / {{ maxIndex }}</span>
@@ -98,6 +99,7 @@ export default {
       maxIndex: 0,
       frameMode: false,
       tileMode: false,
+      imageSizeText: '',
       tileSet: '',
       tileCol: 0,
       tileRow: 0,
@@ -238,6 +240,7 @@ export default {
       this.img = null
       this.maxIndex = 0
       this.frameMode = false
+      this.imageSizeText = ''
       const row = this.currentRow()
       if (!row || row.kind === 'none') {
         this.tileMode = false
@@ -250,6 +253,7 @@ export default {
         const abs = imageAbsPath('tilesets', row.file)
         const loaded = await loadImageFile(abs)
         this.img = loaded ? markRaw(loaded) : null
+        this.imageSizeText = this.img ? `${this.img.width} × ${this.img.height}` : ''
         this._nameChanged = false
         this.$nextTick(() => this.paint())
         return
@@ -258,6 +262,7 @@ export default {
       const abs = imageAbsPath('characters', row.name)
       const loaded = await loadImageFile(abs)
       this.img = loaded ? markRaw(loaded) : null
+      this.imageSizeText = this.img ? `${this.img.width} × ${this.img.height}` : ''
       if (this.img) {
         const layout = characterSheetLayout(this.img, row.name)
         this.big = layout.big
@@ -401,5 +406,10 @@ export default {
   align-items: center;
   gap: 12px;
   font-size: 13px;
+  flex-wrap: wrap;
+}
+.sheet-size {
+  color: var(--app-text-muted, #909399);
+  font-variant-numeric: tabular-nums;
 }
 </style>

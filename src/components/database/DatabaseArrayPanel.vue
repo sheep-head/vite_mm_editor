@@ -7,13 +7,16 @@
         clearable
         placeholder="搜索 ID / 名称"
         class="db-search" />
-      <el-scrollbar class="db-list-scroll">
+      <el-scrollbar class="db-list-scroll" @scroll="closeListMenu">
         <ul>
           <li
             v-for="item in visibleList"
             :key="item.id"
+            tabindex="0"
+            data-editor-list-item
             :class="{ active: current && current.id === item.id }"
-            @click="selectItem(item)">
+            @click="onListClick(item, $event)"
+            @contextmenu.prevent.stop="onListCtx(item, $event)">
             {{ padId(item.id) }}:{{ item.name || '(空)' }}
           </li>
         </ul>
@@ -22,6 +25,14 @@
         <el-button size="small" class="max-btn" @click="changeMax">更改最大值…</el-button>
       </div>
     </aside>
+
+    <popup-context-menu v-model:visible="listMenu.visible" :x="listMenu.x" :y="listMenu.y">
+      <template #default="{ action }">
+        <li @click="action(() => $clearItem())">清空</li>
+        <li @click="action(() => $onCopy())">复制</li>
+        <li @click="action(() => $onPaste())">粘贴</li>
+      </template>
+    </popup-context-menu>
 
     <main class="db-form" v-if="current && current.id">
       <actor-editor-panel v-if="editor === 'actors'" v-model="current" />
@@ -130,10 +141,12 @@
 
 <script>
 import DataManager from '@/utils/DataManager'
+import ShortcutManager from '@/utils/ShortcutManager'
 import EventCommandListEditor from '@/components/map/EventCommandListEditor.vue'
 import CharacterSheetPickerDialog from '@/components/map/pickers/CharacterSheetPickerDialog.vue'
 import FaceSheetPickerDialog from '@/components/map/pickers/FaceSheetPickerDialog.vue'
 import BattlerPickerDialog from '@/components/map/pickers/BattlerPickerDialog.vue'
+import PopupContextMenu from '@/components/shared/PopupContextMenu.vue'
 import AnimationEditorPanel from './AnimationEditorPanel.vue'
 import ActorEditorPanel from './ActorEditorPanel.vue'
 import ClassEditorPanel from './ClassEditorPanel.vue'
@@ -155,6 +168,7 @@ export default {
     CharacterSheetPickerDialog,
     FaceSheetPickerDialog,
     BattlerPickerDialog,
+    PopupContextMenu,
     AnimationEditorPanel,
     ActorEditorPanel,
     ClassEditorPanel,
@@ -193,7 +207,15 @@ export default {
       pickerHue: 0,
       battlerFolder: 'enemies',
       battlerShowHue: true,
+      listMenu: { visible: false, x: 0, y: 0 },
     }
+  },
+  beforeCreate() {
+    ShortcutManager.install(this)
+  },
+  beforeUnmount() {
+    ShortcutManager.uninstall(this)
+    this.clearWatch()
   },
   computed: {
     visibleList() {
@@ -219,9 +241,6 @@ export default {
       this.$emit('dirty-change', v)
     },
   },
-  beforeUnmount() {
-    this.clearWatch()
-  },
   methods: {
     padId(id) {
       return String(id).padStart(4, '0')
@@ -231,6 +250,77 @@ export default {
         this._watchStop()
         this._watchStop = null
       }
+    },
+    closeListMenu() {
+      this.listMenu.visible = false
+    },
+    onListClick(item, e) {
+      this.selectItem(item)
+      if (e && e.currentTarget && e.currentTarget.focus) e.currentTarget.focus()
+    },
+    onListCtx(item, e) {
+      this.selectItem(item)
+      if (e && e.currentTarget && e.currentTarget.focus) e.currentTarget.focus()
+      this.listMenu = { visible: true, x: e.clientX, y: e.clientY }
+    },
+    visibleIndexOfCurrent() {
+      if (!this.current) return -1
+      return this.visibleList.findIndex((x) => x && x.id === this.current.id)
+    },
+    $prevItem() {
+      const i = this.visibleIndexOfCurrent()
+      if (i > 0) this.selectItem(this.visibleList[i - 1])
+    },
+    $nextItem() {
+      const i = this.visibleIndexOfCurrent()
+      if (i >= 0 && i < this.visibleList.length - 1) this.selectItem(this.visibleList[i + 1])
+    },
+    $clearItem() {
+      if (!this.current || !(this.current.id > 0)) return
+      const id = this.current.id
+      const blank = defaultByFileName(this.fileName, id)
+      const idx = this.dataList.findIndex((x) => x && x.id === id)
+      if (idx < 0) return
+      this.dataList.splice(idx, 1, blank)
+      this.dirty = true
+      this.selectItem(this.dataList[idx], true)
+    },
+    $onDelete() {
+      this.$clearItem()
+    },
+    $onCopy() {
+      if (!this.current || !(this.current.id > 0)) return
+      this.$clipboard.set(
+        JSON.stringify({ dataType: this.fileName, data: this.current }),
+      )
+      this.$message.success('复制成功')
+    },
+    $onPaste() {
+      try {
+        const text = this.$clipboard.get()
+        if (!text || !this.current || !(this.current.id > 0)) return
+        const item = JSON.parse(text)
+        if (item.dataType !== this.fileName) {
+          this.$message.error('粘贴失败,粘贴内容与当前内容类型不匹配')
+          return
+        }
+        if (!(item.data && item.data.id > 0)) return
+        const id = this.current.id
+        const idx = this.dataList.findIndex((x) => x && x.id === id)
+        if (idx < 0) return
+        const next = JSON.parse(JSON.stringify(item.data))
+        next.id = id
+        this.dataList.splice(idx, 1, next)
+        this.dirty = true
+        this.selectItem(this.dataList[idx], true)
+        this.$message.success('粘贴成功')
+      } catch (e) {
+        console.log(e)
+        this.$message.error('粘贴失败,无法解析粘贴内容')
+      }
+    },
+    $onSave() {
+      this.save()
     },
     load() {
       this.clearWatch()

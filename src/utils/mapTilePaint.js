@@ -17,6 +17,7 @@ import {
 } from '@/components/map/mapAutotile'
 import DataManager from '@/utils/DataManager'
 import { fs, path, isNw } from '@/utils/nw'
+import { getEventDisplayPage, isEventRef } from '@/components/map/eventRef'
 
 export const TILE = 48
 
@@ -338,7 +339,7 @@ export function drawCharacterSimple(ctx, img, image, dx, dy, tw = TILE, th = TIL
   }
 }
 
-/** 预览用：填充 + 行走图/占位字 + 白框 */
+/** 预览用：填充 + 行走图/占位字 + 白框；style.useHyperlinkImages 时超链接用 Map015 模板图 */
 export function drawMapEventMarker(ctx, event, charImg, style) {
   if (!event) return
   const x = event.x * TILE
@@ -346,8 +347,9 @@ export function drawMapEventMarker(ctx, event, charImg, style) {
   const fill = (style && style.fillColor) || 'rgba(0,0,0,0.3)'
   const largeFit = (style && style.largeFit) || 'center'
   const originalSize = !!(style && style.originalSize)
+  const useTpl = !!(style && style.useHyperlinkImages)
   drawEventFill(ctx, x, y, fill)
-  const page = event.pages && event.pages[0]
+  const page = getEventDisplayPage(event, useTpl)
   const image = page && page.image
   let drew = false
   if (image && image.characterName && charImg) {
@@ -373,6 +375,17 @@ export function drawMapEventMarker(ctx, event, charImg, style) {
     ctx.restore()
   }
   drawEventFrame(ctx, x, y)
+  if (style && style.showHyperlinkMark && isEventRef(event)) {
+    ctx.save()
+    ctx.fillStyle = '#409eff'
+    ctx.fillRect(x + TILE - 15, y + 2, 13, 13)
+    ctx.fillStyle = '#fff'
+    ctx.font = 'bold 10px Arial'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('链', x + TILE - 8.5, y + 9)
+    ctx.restore()
+  }
 }
 
 export async function loadCharacterImage(name) {

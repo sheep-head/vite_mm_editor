@@ -2,6 +2,7 @@
   <div class="image-asset-picker">
     <div class="picker-row">
       <el-input :model-value="displayPath" readonly placeholder="未选择图片" class="path-input" />
+      <span v-if="currentSizeText" class="size-badge" title="当前图片尺寸">{{ currentSizeText }}</span>
       <el-button type="primary" @click="openBrowse">从 img 选择</el-button>
       <el-button @click="openImport">选择导入</el-button>
     </div>
@@ -24,7 +25,7 @@
             v-for="file in files"
             :key="file.name"
             :class="['file-item', selectedName === file.stem ? 'active' : '']"
-            @click="selectedName = file.stem"
+            @click="onSelectBrowseFile(file)"
             @dblclick="confirmBrowse">
             <img v-if="file.preview" :src="file.preview" alt="" />
             <span>{{ file.name }}</span>
@@ -33,6 +34,7 @@
         </div>
       </div>
       <template #footer>
+        <span class="dialog-size">{{ browseSizeText || ' ' }}</span>
         <el-button @click="browseVisible = false">取消</el-button>
         <el-button type="primary" :disabled="!selectedName" @click="confirmBrowse">确定</el-button>
       </template>
@@ -55,8 +57,9 @@
     <el-dialog v-model="confirmVisible" title="确认导入" width="440px" append-to-body>
       <div class="confirm-import">
         <div class="preview-frame single">
-          <img v-if="pendingNewUrl" :src="pendingNewUrl" alt="新图片" />
+          <img v-if="pendingNewUrl" :src="pendingNewUrl" alt="新图片" @load="onPendingNewLoad" />
         </div>
+        <p v-if="pendingNewSizeText" class="size-line">尺寸 {{ pendingNewSizeText }}</p>
         <p class="confirm-path">将导入到 <code>img/{{ pendingDestRel }}</code></p>
       </div>
       <template #footer>
@@ -71,8 +74,9 @@
         <div class="preview-col">
           <div class="preview-label">当前（旧）</div>
           <div class="preview-frame">
-            <img v-if="pendingOldUrl" :src="pendingOldUrl" alt="旧图片" />
+            <img v-if="pendingOldUrl" :src="pendingOldUrl" alt="旧图片" @load="onPendingOldLoad" />
           </div>
+          <p v-if="pendingOldSizeText" class="size-line">{{ pendingOldSizeText }}</p>
         </div>
         <div class="preview-arrow">
           <span class="arrow-text">覆盖后</span>
@@ -81,8 +85,9 @@
         <div class="preview-col">
           <div class="preview-label">新图片</div>
           <div class="preview-frame">
-            <img v-if="pendingNewUrl" :src="pendingNewUrl" alt="新图片" />
+            <img v-if="pendingNewUrl" :src="pendingNewUrl" alt="新图片" @load="onPendingNewLoad" />
           </div>
+          <p v-if="pendingNewSizeText" class="size-line">{{ pendingNewSizeText }}</p>
         </div>
       </div>
       <p class="confirm-path">目标已存在 <code>img/{{ pendingDestRel }}</code>，是否覆盖？</p>
@@ -133,6 +138,11 @@ export default {
       pendingDestFolder: '',
       pendingNewUrl: '',
       pendingOldUrl: '',
+      currentSizeText: '',
+      browseSizeText: '',
+      pendingNewSizeText: '',
+      pendingOldSizeText: '',
+      _sizeToken: 0,
     }
   },
   computed: {
@@ -145,7 +155,77 @@ export default {
       return path.join(config.workSpace, 'img')
     },
   },
+  watch: {
+    modelValue: {
+      immediate: true,
+      handler(v) {
+        this.refreshCurrentSize(v)
+      },
+    },
+  },
   methods: {
+    formatSize(w, h) {
+      if (!w || !h) return ''
+      return `${w} × ${h}`
+    },
+    probeImageSize(urlOrAbs) {
+      return new Promise((resolve) => {
+        if (!urlOrAbs) {
+          resolve('')
+          return
+        }
+        const img = new Image()
+        img.onload = () => resolve(this.formatSize(img.naturalWidth, img.naturalHeight))
+        img.onerror = () => resolve('')
+        img.src = String(urlOrAbs).startsWith('file:') || String(urlOrAbs).startsWith('http')
+          ? urlOrAbs
+          : this.toFileUrl(urlOrAbs)
+      })
+    },
+    resolveRelAbs(rel) {
+      const clean = normalizeImagePath(rel)
+      if (!clean || !this.imgRoot || !path) return ''
+      const base = path.join(this.imgRoot, clean)
+      if (fs && fs.existsSync(base)) return base
+      for (const ext of IMAGE_EXT) {
+        const p = base + ext
+        if (fs && fs.existsSync(p)) return p
+      }
+      return ''
+    },
+    async refreshCurrentSize(rel) {
+      const token = ++this._sizeToken
+      const abs = this.resolveRelAbs(rel)
+      if (!abs) {
+        this.currentSizeText = ''
+        return
+      }
+      const text = await this.probeImageSize(abs)
+      if (token === this._sizeToken) this.currentSizeText = text
+    },
+    async refreshBrowseSize() {
+      this.browseSizeText = ''
+      if (!this.selectedName || !this.currentFolder) return
+      const file = this.files.find((f) => f.stem === this.selectedName)
+      if (!file) return
+      const abs = path.join(this.imgRoot, this.currentFolder, file.name)
+      const text = await this.probeImageSize(abs)
+      if (this.selectedName === file.stem) {
+        this.browseSizeText = text ? `尺寸 ${text}` : ''
+      }
+    },
+    onSelectBrowseFile(file) {
+      this.selectedName = file.stem
+      this.refreshBrowseSize()
+    },
+    onPendingNewLoad(e) {
+      const el = e && e.target
+      this.pendingNewSizeText = el ? this.formatSize(el.naturalWidth, el.naturalHeight) : ''
+    },
+    onPendingOldLoad(e) {
+      const el = e && e.target
+      this.pendingOldSizeText = el ? this.formatSize(el.naturalWidth, el.naturalHeight) : ''
+    },
     toFileUrl(abs) {
       const normalized = String(abs).replace(/\\/g, '/')
       // bust cache for overwrite preview of same path
@@ -170,8 +250,10 @@ export default {
       const start = this.lockFolder || parsed.folder || (this.folders[0] || '')
       this.currentFolder = start
       this.selectedName = parsed.stem
+      this.browseSizeText = ''
       this.loadFiles()
       this.browseVisible = true
+      this.$nextTick(() => this.refreshBrowseSize())
     },
     listImgFolders() {
       if (this.lockFolder) return [this.lockFolder]
@@ -187,6 +269,7 @@ export default {
     selectFolder(f) {
       this.currentFolder = f
       this.selectedName = ''
+      this.browseSizeText = ''
       this.loadFiles()
     },
     loadFiles() {
@@ -288,6 +371,8 @@ export default {
       this.pendingDestRel = `${destFolder}/${base}`
       this.pendingNewUrl = this.toFileUrl(srcPath)
       this.pendingOldUrl = ''
+      this.pendingNewSizeText = ''
+      this.pendingOldSizeText = ''
       this.confirmVisible = true
     },
     onConfirmImport() {
@@ -298,6 +383,7 @@ export default {
       }
       if (fs.existsSync(this.pendingDestPath)) {
         this.pendingOldUrl = this.toFileUrl(this.pendingDestPath)
+        this.pendingOldSizeText = ''
         this.overwriteVisible = true
         return
       }
@@ -332,6 +418,27 @@ export default {
 }
 .path-input {
   flex: 1;
+}
+.size-badge {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--app-text-muted, #909399);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.dialog-size {
+  flex: 1;
+  text-align: left;
+  font-size: 12px;
+  color: var(--app-text-muted, #909399);
+  font-variant-numeric: tabular-nums;
+}
+.size-line {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--app-text-muted, #909399);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 .browse-body {
   display: flex;
@@ -493,5 +600,11 @@ export default {
   font-size: 22px;
   line-height: 1;
   font-weight: 600;
+}
+:deep(.el-dialog__footer) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 </style>

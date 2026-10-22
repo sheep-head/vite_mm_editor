@@ -1,7 +1,16 @@
 <template>
-  <div class="id-name-field">
-    <el-input :model-value="display" size="small" readonly :disabled="disabled" :style="{ width: width }" />
-    <el-button size="small" :disabled="disabled" @click="open = true">...</el-button>
+  <div class="id-name-field" :style="width ? { width } : undefined">
+    <el-input
+      :model-value="display"
+      size="small"
+      readonly
+      :disabled="disabled"
+      class="id-name-input"
+      @click="!disabled && (open = true)">
+      <template #append>
+        <el-button :disabled="disabled" @click.stop="open = true">...</el-button>
+      </template>
+    </el-input>
     <id-name-picker-dialog
       v-model="open"
       :type="type"
@@ -75,8 +84,30 @@ export default {
 
 <style scoped>
 .id-name-field {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  display: inline-block;
+  vertical-align: middle;
+  max-width: 100%;
+}
+.id-name-input {
+  width: 100%;
+}
+.id-name-input :deep(.el-input__wrapper),
+.id-name-input :deep(.el-input-group__append) {
+  cursor: pointer;
+}
+.id-name-input :deep(.el-input-group__append) {
+  padding: 0;
+}
+.id-name-input :deep(.el-input-group__append .el-button) {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  height: 100%;
+  padding: 0 12px;
+  background: transparent;
+}
+.id-name-input.is-disabled :deep(.el-input__wrapper),
+.id-name-input.is-disabled :deep(.el-input-group__append) {
+  cursor: not-allowed;
 }
 </style>

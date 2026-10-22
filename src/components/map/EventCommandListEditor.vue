@@ -43,23 +43,23 @@
       </template>
     </el-dialog>
 
-    <teleport to="body">
-      <ul
-        v-show="menu.visible"
-        ref="cmdMenu"
-        class="contextmenu ev-cmd-ctx"
-        :style="menuStyle"
-        @contextmenu.prevent>
-        <li :class="{ disabled: readonly }" @click="menuAction(openInsert)">插入</li>
-        <li :class="{ disabled: !canCopy }" @click="menuAction(copySelected)">复制</li>
-        <li :class="{ disabled: !canCopy }" @click="menuAction(cutSelected)">剪切</li>
-        <li :class="{ disabled: !canPaste }" @click="menuAction(pasteClipboard)">粘贴</li>
-        <li class="ev-cmd-ctx-sep" />
-        <li :class="{ disabled: !canMoveCmd(-1) }" @click="menuAction(() => moveSelectedCmd(-1))">上移</li>
-        <li :class="{ disabled: !canMoveCmd(1) }" @click="menuAction(() => moveSelectedCmd(1))">下移</li>
-        <li :class="{ disabled: !canDelete }" @click="menuAction(removeSelectedCmd)">删除</li>
-      </ul>
-    </teleport>
+    <popup-context-menu
+      :visible="menu.visible"
+      :x="menu.x"
+      :y="menu.y"
+      @update:visible="(v) => (menu.visible = v)">
+      <template #default="{ action }">
+        <li :class="{ disabled: !canEditCmd }" @click="action(onListDblClick)">编辑</li>
+        <li :class="{ disabled: readonly }" @click="action(openInsert)">插入</li>
+        <li :class="{ disabled: !canCopy }" @click="action(copySelected)">复制</li>
+        <li :class="{ disabled: !canCopy }" @click="action(cutSelected)">剪切</li>
+        <li :class="{ disabled: !canPaste }" @click="action(pasteClipboard)">粘贴</li>
+        <li class="sep" />
+        <li :class="{ disabled: !canMoveCmd(-1) }" @click="action(() => moveSelectedCmd(-1))">上移</li>
+        <li :class="{ disabled: !canMoveCmd(1) }" @click="action(() => moveSelectedCmd(1))">下移</li>
+        <li :class="{ disabled: !canDelete }" @click="action(removeSelectedCmd)">删除</li>
+      </template>
+    </popup-context-menu>
 
     <event-command-select-dialog v-model="cmdSelectVisible" @select="onCatalogSelect" />
     <param-dialog-host
@@ -86,6 +86,7 @@ import EventCommandSelectDialog from './EventCommandSelectDialog.vue'
 import ParamDialogHost from './ParamDialogHost.vue'
 import { findCatalogEntry } from './eventCommandCatalog'
 import JsonTreeView from './JsonTreeView.vue'
+import PopupContextMenu from '@/components/shared/PopupContextMenu.vue'
 
 /** 模块级剪贴板：地图事件与公共事件之间可互贴 */
 let commandClipboard = null
@@ -93,7 +94,7 @@ const MIN_VISIBLE_ROWS = 24
 
 export default {
   name: 'EventCommandListEditor',
-  components: { EventCommandSelectDialog, ParamDialogHost, JsonTreeView },
+  components: { EventCommandSelectDialog, ParamDialogHost, JsonTreeView, PopupContextMenu },
   props: {
     modelValue: { type: Array, default: () => [] },
     readonly: { type: Boolean, default: false },
@@ -144,17 +145,17 @@ export default {
       }
       return rows
     },
-    menuStyle() {
-      return {
-        position: 'fixed',
-        left: this.menu.x + 'px',
-        top: this.menu.y + 'px',
-        zIndex: 4000,
-      }
-    },
     canCopy() {
       if (this.readonly) return false
       return this.collectCopyCommands().length > 0
+    },
+    canEditCmd() {
+      if (this.readonly) return false
+      const list = this.list
+      if (!list || !list.length) return false
+      const unit = getNavUnit(list, this.focusIndex)
+      const cmd = list[unit.start]
+      return !!(cmd && cmd.code !== 0)
     },
     canDelete() {
       if (this.readonly) return false
@@ -196,14 +197,6 @@ export default {
         this._paramConfirmed = false
       }
     },
-  },
-  mounted() {
-    document.addEventListener('mousedown', this.onDocMouseDown, true)
-    window.addEventListener('blur', this.closeMenu)
-  },
-  beforeUnmount() {
-    document.removeEventListener('mousedown', this.onDocMouseDown, true)
-    window.removeEventListener('blur', this.closeMenu)
   },
   methods: {
     ensurePartsCache() {
@@ -381,12 +374,6 @@ export default {
     closeMenu() {
       this.menu.visible = false
     },
-    onDocMouseDown(e) {
-      if (!this.menu.visible) return
-      const t = e.target
-      if (t && t.closest && t.closest('.ev-cmd-ctx')) return
-      this.closeMenu()
-    },
     onContextMenu(e) {
       e.preventDefault()
       const line = e.target && e.target.closest ? e.target.closest('.ev-cmd-line') : null
@@ -401,25 +388,6 @@ export default {
       }
       if (this.readonly) return
       this.menu = { visible: true, x: e.clientX, y: e.clientY }
-      this.$nextTick(() => {
-        const el = this.$refs.cmdMenu
-        if (!el) return
-        const h = el.offsetHeight || 0
-        const w = el.offsetWidth || 0
-        const pad = 4
-        let x = e.clientX
-        let y = e.clientY
-        if (y + h > window.innerHeight - pad) y = e.clientY - h
-        if (y < pad) y = pad
-        if (x + w > window.innerWidth - pad) x = window.innerWidth - w - pad
-        if (x < pad) x = pad
-        this.menu.x = x
-        this.menu.y = y
-      })
-    },
-    menuAction(fn) {
-      if (typeof fn === 'function') fn()
-      this.closeMenu()
     },
     openInsert() {
       if (this.readonly) return
@@ -998,24 +966,5 @@ export default {
 }
 .is-readonly .ev-cmd-list {
   opacity: 0.85;
-}
-</style>
-
-<style>
-.ev-cmd-ctx li.disabled {
-  opacity: 0.4;
-  pointer-events: none;
-  cursor: default;
-}
-.ev-cmd-ctx li.ev-cmd-ctx-sep {
-  height: 1px;
-  margin: 4px 8px;
-  padding: 0;
-  background: var(--app-border, #444);
-  cursor: default;
-  pointer-events: none;
-}
-.ev-cmd-ctx li.ev-cmd-ctx-sep:hover {
-  background: var(--app-border, #444);
 }
 </style>

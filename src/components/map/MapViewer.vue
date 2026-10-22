@@ -62,7 +62,7 @@ import {
   refreshAutotileNeighbors,
 } from './mapAutotile'
 import { tileSetOfId } from '@/utils/imgAssets'
-import { isEventRef } from './eventRef'
+import { isEventRef, getEventDisplayPage } from './eventRef'
 
 const DIM_ALPHA = 0.35
 const WALK_ANIM_FPS = 10
@@ -166,6 +166,7 @@ export default {
       'mapCharOriginalSize',
       'previewWalkAnim',
       'showHyperlinks',
+      'showHyperlinkImages',
       'focusEventRequest',
       'editorUi',
       'paintTool',
@@ -181,6 +182,10 @@ export default {
     },
     isEventMode() {
       return this.editorMode === 'event'
+    },
+    /** 超链接桩是否按 Map015 模板图像绘制 */
+    useHyperlinkImages() {
+      return !!(this.showHyperlinks && this.showHyperlinkImages)
     },
     effectiveShowGrid() {
       return this.showGrid || this.isEventMode
@@ -271,6 +276,15 @@ export default {
     },
     showHyperlinks() {
       this.refreshEventsLayer()
+    },
+    showHyperlinkImages() {
+      if (this.useHyperlinkImages && this.currentMapData) {
+        this.preloadEventCharacters(this._loadToken)
+          .then(() => this.refreshEventsLayer())
+          .catch((e) => console.error(e))
+      } else {
+        this.refreshEventsLayer()
+      }
     },
     focusEventRequest(req) {
       if (!req) return
@@ -1046,10 +1060,13 @@ export default {
     },
 
     async preloadEventCharacters(token) {
+      if (!this.currentMapData) return
       const names = new Set()
+      const useTpl = this.useHyperlinkImages
       ;(this.currentMapData.events || []).forEach((ev) => {
-        if (!ev || !ev.pages || !ev.pages[0] || !ev.pages[0].image) return
-        const n = ev.pages[0].image.characterName
+        if (!ev) return
+        const page = getEventDisplayPage(ev, useTpl)
+        const n = page && page.image && page.image.characterName
         if (n) names.add(n)
       })
       // 限流：避免一张图上百张行走图同时解码把 NW 打崩
@@ -1915,6 +1932,7 @@ export default {
       if (!ctx || !this.currentMapData || !this.currentMapData.events) return
       const tw = this.cacheTw()
       const th = this.cacheTh()
+      const useTpl = this.useHyperlinkImages
       ctx.font = Math.max(9, Math.round(12 * (tw / this.tileWidth))) + 'px Arial'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
@@ -1923,7 +1941,7 @@ export default {
         const x = event.x * tw
         const y = event.y * th
         this.drawEventFill(ctx, x, y)
-        const page = event.pages && event.pages[0]
+        const page = getEventDisplayPage(event, useTpl)
         const image = page && page.image
         let drew = false
         if (image && image.tileId > 0) {
@@ -2009,6 +2027,7 @@ export default {
       if (!ctx || !range || !this.currentMapData || !this.currentMapData.events) return
       const tw = this.tileWidth
       const th = this.tileHeight
+      const useTpl = this.useHyperlinkImages
       ctx.font = '12px Arial'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
@@ -2018,7 +2037,7 @@ export default {
         const x = event.x * tw
         const y = event.y * th
         this.drawEventFill(ctx, x, y)
-        const page = event.pages && event.pages[0]
+        const page = getEventDisplayPage(event, useTpl)
         const image = page && page.image
         let drew = false
         if (image && image.tileId > 0) {

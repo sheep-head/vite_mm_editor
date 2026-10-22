@@ -1,44 +1,62 @@
 <template>
-  <el-dialog :model-value="modelValue" title="战斗处理" width="440px" append-to-body destroy-on-close :close-on-click-modal="false" @update:model-value="$emit('update:modelValue', $event)">
-    <el-form size="small" label-width="88px">
-      <el-form-item label="指定">
-        <el-radio-group v-model="designation">
-          <el-radio :value="0">直接</el-radio>
-          <el-radio :value="1">变量</el-radio>
-          <el-radio :value="2">随机遇敌</el-radio>
-        </el-radio-group>
-      </el-form-item>
-      <el-form-item v-if="designation === 0" label="敌群">
-        <el-input-number v-model="troopId" :min="1" controls-position="right" />
-        <el-button size="small" @click="pickerVisible = true">...</el-button>
-      </el-form-item>
-      <el-form-item v-else-if="designation === 1" label="变量">
-        <el-input-number v-model="troopId" :min="1" controls-position="right" />
-      </el-form-item>
-      <el-form-item label="可逃跑"><el-checkbox v-model="canEscape" /></el-form-item>
-      <el-form-item label="可失败"><el-checkbox v-model="canLose" /></el-form-item>
-    </el-form>
+  <el-dialog
+    :model-value="modelValue"
+    title="战斗处理"
+    width="440px"
+    append-to-body
+    destroy-on-close
+    :close-on-click-modal="false"
+    @update:model-value="$emit('update:modelValue', $event)">
+    <db-group-box title="敌群" class="battle-box">
+      <div class="battle-opt">
+        <el-radio v-model="designation" :value="0">直接指定</el-radio>
+        <id-name-field
+          v-model="troopId"
+          type="troop"
+          width="220px"
+          :disabled="designation !== 0"
+          :allow-none="false" />
+      </div>
+      <div class="battle-opt">
+        <el-radio v-model="designation" :value="1">变量指定</el-radio>
+        <id-name-field
+          v-model="varId"
+          type="variable"
+          width="220px"
+          :disabled="designation !== 1"
+          :allow-none="false" />
+      </div>
+      <div class="battle-opt">
+        <el-radio v-model="designation" :value="2">与随机遇敌相同</el-radio>
+      </div>
+    </db-group-box>
+    <div class="battle-flags">
+      <el-checkbox v-model="canEscape">允许逃跑</el-checkbox>
+      <el-checkbox v-model="canLose">允许失败</el-checkbox>
+    </div>
     <template #footer>
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
       <el-button type="primary" @click="ok">确定</el-button>
     </template>
-    <id-name-picker-dialog v-model="pickerVisible" type="troop" :model-id="troopId" @confirm="(id) => (troopId = id)" />
   </el-dialog>
 </template>
+
 <script>
-import IdNamePickerDialog from '../pickers/IdNamePickerDialog.vue'
+import DbGroupBox from '@/components/database/shared/DbGroupBox.vue'
+import IdNameField from '@/components/database/shared/IdNameField.vue'
+
 export default {
   name: 'Cmd301Battle',
-  components: { IdNamePickerDialog },
+  components: { DbGroupBox, IdNameField },
   props: { modelValue: Boolean, command: Object },
   emits: ['update:modelValue', 'confirm'],
   data() {
     return {
       designation: 0,
       troopId: 1,
+      varId: 1,
       canEscape: true,
       canLose: false,
-      pickerVisible: false,
       editOnly: false,
     }
   },
@@ -48,9 +66,15 @@ export default {
       handler(v) {
         if (!v) return
         const c = this.command
-        const p = (c && c.parameters) || [0, 0, true, false]
+        const p = (c && c.parameters) || [0, 1, true, false]
         this.designation = p[0] || 0
-        this.troopId = p[1] || 1
+        if (this.designation === 1) {
+          this.varId = p[1] || 1
+          this.troopId = 1
+        } else {
+          this.troopId = p[1] || 1
+          this.varId = 1
+        }
         this.canEscape = p[2] !== false
         this.canLose = !!p[3]
         this.editOnly = !!(c && c.code === 301 && Array.isArray(c.parameters) && c.parameters.length)
@@ -60,17 +84,17 @@ export default {
   methods: {
     ok() {
       const indent = (this.command && this.command.indent) || 0
+      const id = this.designation === 1 ? this.varId : this.designation === 0 ? this.troopId : 0
       const cmd301 = {
         code: 301,
         indent,
-        parameters: [this.designation, this.troopId, this.canEscape, this.canLose],
+        parameters: [this.designation, id, this.canEscape, this.canLose],
       }
       if (this.editOnly) {
         this.$emit('confirm', [cmd301])
         this.$emit('update:modelValue', false)
         return
       }
-      // 胜利 / 逃跑 / 失败 / 结束
       const commands = [
         cmd301,
         { code: 601, indent, parameters: [] },
@@ -87,3 +111,25 @@ export default {
   },
 }
 </script>
+
+<style scoped>
+.battle-box {
+  margin-bottom: 12px;
+}
+.battle-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.battle-opt :deep(.el-radio) {
+  min-width: 120px;
+}
+.battle-flags {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 4px;
+}
+</style>

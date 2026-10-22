@@ -13,6 +13,7 @@ const DEFAULT_MAP_TOOLS = {
   charOriginalSize: false,
   previewWalkAnim: false,
   showHyperlinks: false,
+  showHyperlinkImages: false,
 }
 
 function readMapToolsFromSettings() {
@@ -95,6 +96,7 @@ const store = createStore({
       mapCharOriginalSize: !!initialMapTools.charOriginalSize,
       previewWalkAnim: !!initialMapTools.previewWalkAnim,
       showHyperlinks: !!initialMapTools.showHyperlinks,
+      showHyperlinkImages: !!initialMapTools.showHyperlinkImages,
       focusEventRequest: null,
       editorUi: initialEditorUi,
     },
@@ -157,6 +159,9 @@ const store = createStore({
     showHyperlinks(state) {
       return state.editor.showHyperlinks
     },
+    showHyperlinkImages(state) {
+      return !!state.editor.showHyperlinkImages
+    },
     focusEventRequest(state) {
       return state.editor.focusEventRequest
     },
@@ -174,6 +179,7 @@ const store = createStore({
         charOriginalSize: e.mapCharOriginalSize,
         previewWalkAnim: e.previewWalkAnim,
         showHyperlinks: e.showHyperlinks,
+        showHyperlinkImages: e.showHyperlinkImages,
       }
     },
   },
@@ -247,6 +253,10 @@ const store = createStore({
     },
     setShowHyperlinks(state, v) {
       state.editor.showHyperlinks = !!v
+      if (!v) state.editor.showHyperlinkImages = false
+    },
+    setShowHyperlinkImages(state, v) {
+      state.editor.showHyperlinkImages = !!v && !!state.editor.showHyperlinks
     },
     setFocusEventRequest(state, req) {
       state.editor.focusEventRequest = req
@@ -293,6 +303,10 @@ const store = createStore({
     },
     setShowHyperlinksPersist({ commit, dispatch }, v) {
       commit('setShowHyperlinks', v)
+      dispatch('persistMapTools')
+    },
+    setShowHyperlinkImagesPersist({ commit, dispatch }, v) {
+      commit('setShowHyperlinkImages', v)
       dispatch('persistMapTools')
     },
     closeMapTools({ commit, dispatch }) {

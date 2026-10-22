@@ -36,6 +36,18 @@
           <span class="mtp-q">?</span>
         </el-tooltip>
       </div>
+      <div v-if="showHyperlinks" class="mtp-row mtp-row-tip">
+        <el-checkbox :model-value="showHyperlinkImages" @change="onHyperlinkImages">
+          显示超链接事件图
+        </el-checkbox>
+        <el-tooltip
+          :content="hyperlinkImageTip"
+          placement="top"
+          :show-after="200"
+          popper-class="map-tools-tip">
+          <span class="mtp-q">?</span>
+        </el-tooltip>
+      </div>
       <div class="mtp-row">
         <el-button size="small" type="primary" @click="searcherVisible = true">事件查找器</el-button>
       </div>
@@ -61,7 +73,9 @@ export default {
       searcherVisible: false,
       drag: null,
       hyperlinkTip:
-        '【测试提示】开启后识别仅含注释 $events.ref(n) 的单页事件为超链接，引用固定为 Map015 上 id=n 的模板事件。打开时可查看模板内容并跳转。',
+        '开启后在地图上标记超链接事件（单页仅含注释 $events.ref(n)，模板固定 Map015）。事件编辑器内可「转为超链接」「修改链接」「取消超链接」，也可「查看模板」并跳转。',
+      hyperlinkImageTip:
+        '开启后，地图上的超链接事件按 Map015 模板事件的图像绘制；场所移动 / 移动路线预览同样生效。',
     }
   },
   computed: {
@@ -72,6 +86,7 @@ export default {
       'mapCharOriginalSize',
       'previewWalkAnim',
       'showHyperlinks',
+      'showHyperlinkImages',
       'showGrid',
       'showRegions',
       'showEvents',
@@ -131,6 +146,9 @@ export default {
     },
     onHyperlinks(v) {
       this.$store.dispatch('setShowHyperlinksPersist', v)
+    },
+    onHyperlinkImages(v) {
+      this.$store.dispatch('setShowHyperlinkImagesPersist', v)
     },
     onGrid(v) {
       this.$store.commit('setShowGrid', v)

@@ -32,10 +32,13 @@
         <div class="sheet-preview-box">
           <canvas ref="canvas" class="sheet-canvas" @dblclick="confirm" />
         </div>
-        <div v-if="showHue" class="sheet-meta">
-          <span>色相</span>
-          <el-slider v-model="hue" :min="0" :max="360" style="flex: 1; margin: 0 12px" />
-          <el-input-number v-model="hue" :min="0" :max="360" size="small" controls-position="right" />
+        <div class="sheet-meta">
+          <span v-if="imageSizeText" class="sheet-size">{{ imageSizeText }}</span>
+          <template v-if="showHue">
+            <span>色相</span>
+            <el-slider v-model="hue" :min="0" :max="360" style="flex: 1; margin: 0 12px" />
+            <el-input-number v-model="hue" :min="0" :max="360" size="small" controls-position="right" />
+          </template>
         </div>
       </div>
     </div>
@@ -74,6 +77,7 @@ export default {
       names: [],
       selectedName: '',
       hue: 0,
+      imageSizeText: '',
     }
   },
   created() {
@@ -125,6 +129,7 @@ export default {
     },
     async reloadImage() {
       this.img = null
+      this.imageSizeText = ''
       if (!this.selectedName) {
         this.paint()
         return
@@ -134,6 +139,7 @@ export default {
         : imageAbsPath(this.folder, this.selectedName)
       const loaded = await loadImageFile(abs)
       this.img = loaded ? markRaw(loaded) : null
+      this.imageSizeText = this.img ? `${this.img.width} × ${this.img.height}` : ''
       this.$nextTick(() => this.paint())
     },
     paint() {
@@ -233,6 +239,12 @@ export default {
 .sheet-meta {
   display: flex;
   align-items: center;
+  gap: 12px;
   font-size: 13px;
+  flex-wrap: wrap;
+}
+.sheet-size {
+  color: var(--app-text-muted, #909399);
+  font-variant-numeric: tabular-nums;
 }
 </style>

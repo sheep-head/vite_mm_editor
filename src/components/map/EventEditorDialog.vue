@@ -22,6 +22,18 @@
           跳转到模板事件
         </el-button>
       </div>
+      <div v-else-if="isLocalHyperlink" class="ev-ref-banner">
+        <span>
+          超链接事件 → Map{{ String(refTemplateMapId).padStart(3, '0') }} / EV{{
+            String(localRefId).padStart(3, '0')
+          }}
+        </span>
+        <div class="ev-ref-actions">
+          <el-button size="small" type="primary" @click="viewTemplate">查看模板</el-button>
+          <el-button size="small" @click="openRefPicker(false)">修改链接事件</el-button>
+          <el-button size="small" type="danger" plain @click="cancelHyperlink">取消超链接</el-button>
+        </div>
+      </div>
 
       <div class="ev-top">
         <el-form inline size="small" label-width="48px" :disabled="isRefMode" class="ev-meta">
@@ -33,11 +45,16 @@
           </el-form-item>
         </el-form>
         <div v-if="!isRefMode" class="ev-page-ops">
-          <el-button size="small" @click="addPage">新建事件页</el-button>
-          <el-button size="small" @click="copyPage">复制事件页</el-button>
-          <el-button size="small" :disabled="!pageClipboard" @click="pastePage">粘贴事件页</el-button>
-          <el-button size="small" :disabled="draft.pages.length <= 1" @click="removePage">删除事件页</el-button>
-          <el-button size="small" @click="clearPage">清空事件页</el-button>
+          <template v-if="!isLocalHyperlink">
+            <el-button size="small" @click="addPage">新建事件页</el-button>
+            <el-button size="small" @click="copyPage">复制事件页</el-button>
+            <el-button size="small" :disabled="!pageClipboard" @click="pastePage">粘贴事件页</el-button>
+            <el-button size="small" :disabled="draft.pages.length <= 1" @click="removePage">删除事件页</el-button>
+            <el-button size="small" @click="clearPage">清空事件页</el-button>
+            <el-button size="small" type="warning" plain @click="openRefPicker(true)">
+              转为超链接事件
+            </el-button>
+          </template>
         </div>
       </div>
 
@@ -194,7 +211,7 @@
           <event-command-list-editor
             v-if="currentPage"
             v-model="currentPage.list"
-            :readonly="isRefMode" />
+            :readonly="isRefMode || isLocalHyperlink" />
         </section>
       </div>
     </div>
@@ -204,6 +221,11 @@
       <el-button v-if="!isRefMode" @click="apply">应用</el-button>
       <el-button v-if="!isRefMode" type="primary" @click="confirm">确定</el-button>
     </template>
+
+    <event-ref-picker-dialog
+      v-model="refPickerVisible"
+      :ref-id="refPickerSeed"
+      @confirm="onRefPicked" />
 
     <move-route-editor
       v-model="moveRouteVisible"
@@ -282,6 +304,13 @@ import IdNameField from '@/components/database/shared/IdNameField.vue'
 import CharacterSheetPickerDialog from './pickers/CharacterSheetPickerDialog.vue'
 import EventCommandListEditor from './EventCommandListEditor.vue'
 import MoveRouteEditor from './MoveRouteEditor.vue'
+import EventRefPickerDialog from './EventRefPickerDialog.vue'
+import {
+  REF_TEMPLATE_MAP_ID,
+  parseEventRef,
+  applyEventRef,
+  clearEventRef,
+} from './eventRef'
 
 export default {
   name: 'EventEditorDialog',
@@ -291,13 +320,14 @@ export default {
     CharacterSheetPickerDialog,
     EventCommandListEditor,
     MoveRouteEditor,
+    EventRefPickerDialog,
   },
   props: {
     modelValue: { type: Boolean, default: false },
     event: { type: Object, default: null },
     refMode: { type: Object, default: null },
   },
-  emits: ['update:modelValue', 'confirm', 'apply', 'jump-to-ref'],
+  emits: ['update:modelValue', 'confirm', 'apply', 'jump-to-ref', 'view-ref'],
   provide() {
     return {
       editingMapEvent: () => this.event || this.draft,
@@ -319,6 +349,10 @@ export default {
       imageEditVisible: false,
       charPickerVisible: false,
       moveRouteVisible: false,
+      refPickerVisible: false,
+      refPickerSeed: 0,
+      convertingToRef: false,
+      refTemplateMapId: REF_TEMPLATE_MAP_ID,
       _charImg: null,
     }
   },
@@ -326,10 +360,20 @@ export default {
     isRefMode() {
       return !!(this.refMode && this.refMode.refId)
     },
+    localRefId() {
+      if (this.isRefMode || !this.draft) return null
+      return parseEventRef(this.draft)
+    },
+    isLocalHyperlink() {
+      return this.localRefId != null
+    },
     dialogTitle() {
       if (!this.draft) return '事件编辑器'
       if (this.isRefMode) {
         return `引用事件 · Map${String(this.refMode.mapId).padStart(3, '0')} EV${String(this.refMode.refId).padStart(3, '0')}`
+      }
+      if (this.isLocalHyperlink) {
+        return `ID:${String(this.draft.id).padStart(3, '0')} - 超链接事件`
       }
       return `ID:${String(this.draft.id).padStart(3, '0')} - 事件编辑器`
     },
@@ -355,6 +399,12 @@ export default {
   watch: {
     modelValue(v) {
       if (v) this.resetDraft()
+    },
+    event() {
+      if (this.modelValue) this.resetDraft()
+    },
+    refMode() {
+      if (this.modelValue) this.resetDraft()
     },
     pageIndex() {
       this.$nextTick(() => this.paintCharPreview())
@@ -403,6 +453,52 @@ export default {
       if (!window.confirm('清空当前事件页？')) return
       this.draft.pages[this.pageIndex] = createEmptyPage()
       this.paintCharPreview()
+    },
+    async openRefPicker(converting) {
+      if (!this.draft || this.isRefMode) return
+      this.convertingToRef = !!converting
+      if (converting) {
+        try {
+          await ElMessageBox.confirm(
+            '转为超链接后将清空现有事件页内容，仅保留指向 Map015 模板事件的注释。是否继续？',
+            '转为超链接事件',
+            { type: 'warning', confirmButtonText: '继续', cancelButtonText: '取消' },
+          )
+        } catch (e) {
+          this.convertingToRef = false
+          return
+        }
+      }
+      this.refPickerSeed = this.localRefId || 0
+      this.refPickerVisible = true
+    },
+    onRefPicked(refId) {
+      if (!this.draft || !refId) return
+      applyEventRef(this.draft, refId)
+      this.pageIndex = 0
+      this.convertingToRef = false
+      this.$nextTick(() => this.paintCharPreview())
+      ElMessage.success(`已链接到 Map${String(REF_TEMPLATE_MAP_ID).padStart(3, '0')} EV${String(refId).padStart(3, '0')}`)
+    },
+    async cancelHyperlink() {
+      if (!this.draft || !this.isLocalHyperlink) return
+      try {
+        await ElMessageBox.confirm(
+          '取消超链接将删除 $events.ref 注释，事件变为空页。是否继续？',
+          '取消超链接',
+          { type: 'warning', confirmButtonText: '取消超链接', cancelButtonText: '返回' },
+        )
+      } catch (e) {
+        return
+      }
+      clearEventRef(this.draft)
+      this.pageIndex = 0
+      this.$nextTick(() => this.paintCharPreview())
+      ElMessage.success('已取消超链接')
+    },
+    viewTemplate() {
+      if (this.localRefId == null) return
+      this.$emit('view-ref', this.localRefId)
     },
     openPicker(type, field) {
       this.pickerType = type
@@ -583,6 +679,12 @@ export default {
   background: rgba(230, 162, 60, 0.12);
   border: 1px solid rgba(230, 162, 60, 0.45);
   border-radius: 4px;
+}
+.ev-ref-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
 }
 .ev-body {
   display: flex;

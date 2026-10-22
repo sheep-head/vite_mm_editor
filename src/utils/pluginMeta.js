@@ -92,7 +92,40 @@ export function structFieldDefaults(fields) {
 }
 
 function emptyMeta() {
-  return { plugindesc: '', author: '', target: '', help: '', params: [], structs: {} }
+  return { plugindesc: '', author: '', target: '', help: '', params: [], commands: [], structs: {} }
+}
+
+function emptyField(name) {
+  return {
+    name: name || '',
+    text: name || '',
+    desc: '',
+    type: '',
+    default: '',
+    min: '',
+    max: '',
+    parent: '',
+    dir: '',
+    on: '',
+    off: '',
+    options: [],
+  }
+}
+
+function emptyCommand(name) {
+  return {
+    name: name || '',
+    text: name || '',
+    desc: '',
+    args: [],
+  }
+}
+
+function finalizeFields(list) {
+  ;(list || []).forEach((p) => {
+    p.typeInfo = classifyParam(p)
+    p.group = p.typeInfo.kind === 'group'
+  })
 }
 
 function commentLines(body) {
@@ -108,8 +141,69 @@ function commentLines(body) {
 function parseLines(lines) {
   const meta = emptyMeta()
   let current = null
+  let currentCommand = null
   let mode = ''
   let lastOption = null
+
+  const applyFieldTag = (name, rest) => {
+    if (!current) return false
+    if (name === 'text') {
+      current.text = rest
+      mode = 'param'
+      return true
+    }
+    if (name === 'desc') {
+      current.desc = rest
+      mode = 'desc'
+      return true
+    }
+    if (name === 'type') {
+      current.type = rest
+      mode = 'param'
+      return true
+    }
+    if (name === 'default') {
+      current.default = rest
+      mode = 'param'
+      return true
+    }
+    if (name === 'min') {
+      current.min = rest
+      return true
+    }
+    if (name === 'max') {
+      current.max = rest
+      return true
+    }
+    if (name === 'parent') {
+      current.parent = rest
+      return true
+    }
+    if (name === 'dir') {
+      current.dir = rest
+      return true
+    }
+    if (name === 'on') {
+      current.on = rest
+      return true
+    }
+    if (name === 'off') {
+      current.off = rest
+      return true
+    }
+    if (name === 'option') {
+      lastOption = { label: rest, value: rest }
+      current.options.push(lastOption)
+      mode = 'param'
+      return true
+    }
+    if (name === 'value' && lastOption) {
+      lastOption.value = rest
+      return true
+    }
+    return false
+  }
+
   lines.forEach((line) => {
     const tag = line.match(/^@(\w+)(?:\s+([\s\S]*))?$/)
     if (tag) {
@@ -119,64 +213,49 @@ function parseLines(lines) {
         meta.plugindesc = rest
         mode = 'plugindesc'
         current = null
+        currentCommand = null
       } else if (name === 'author') {
         meta.author = rest
         mode = ''
+        current = null
+        currentCommand = null
       } else if (name === 'target') {
         meta.target = rest
         mode = ''
+        current = null
+        currentCommand = null
       } else if (name === 'help') {
         mode = 'help'
         meta.help = rest ? rest + '\n' : ''
         current = null
+        currentCommand = null
+      } else if (name === 'command') {
+        currentCommand = emptyCommand(rest)
+        meta.commands.push(currentCommand)
+        current = null
+        mode = 'command'
+        lastOption = null
+      } else if (name === 'arg' && currentCommand) {
+        current = emptyField(rest)
+        currentCommand.args.push(current)
+        mode = 'param'
+        lastOption = null
       } else if (name === 'param') {
-        current = {
-          name: rest,
-          text: rest,
-          desc: '',
-          type: '',
-          default: '',
-          min: '',
-          max: '',
-          parent: '',
-          dir: '',
-          on: '',
-          off: '',
-          options: [],
-        }
+        currentCommand = null
+        current = emptyField(rest)
         meta.params.push(current)
         mode = 'param'
         lastOption = null
-      } else if (current && name === 'text') {
-        current.text = rest
-        mode = 'param'
-      } else if (current && name === 'desc') {
-        current.desc = rest
-        mode = 'desc'
-      } else if (current && name === 'type') {
-        current.type = rest
-        mode = 'param'
-      } else if (current && name === 'default') {
-        current.default = rest
-        mode = 'param'
-      } else if (current && name === 'min') {
-        current.min = rest
-      } else if (current && name === 'max') {
-        current.max = rest
-      } else if (current && name === 'parent') {
-        current.parent = rest
-      } else if (current && name === 'dir') {
-        current.dir = rest
-      } else if (current && name === 'on') {
-        current.on = rest
-      } else if (current && name === 'off') {
-        current.off = rest
-      } else if (current && name === 'option') {
-        lastOption = { label: rest, value: rest }
-        current.options.push(lastOption)
-        mode = 'param'
-      } else if (current && name === 'value' && lastOption) {
-        lastOption.value = rest
+      } else if (currentCommand && !current && (name === 'text' || name === 'desc')) {
+        if (name === 'text') {
+          currentCommand.text = rest
+          mode = 'command'
+        } else {
+          currentCommand.desc = rest
+          mode = 'commandDesc'
+        }
+      } else if (applyFieldTag(name, rest)) {
+        /* field tags */
       } else {
         mode = ''
       }
@@ -184,12 +263,15 @@ function parseLines(lines) {
     }
     if (mode === 'help') meta.help += line + '\n'
     else if (mode === 'desc' && current) current.desc += (current.desc ? '\n' : '') + line
-    else if (mode === 'plugindesc' && line.trim()) meta.plugindesc += ' ' + line.trim()
+    else if (mode === 'commandDesc' && currentCommand) {
+      currentCommand.desc += (currentCommand.desc ? '\n' : '') + line
+    } else if (mode === 'plugindesc' && line.trim()) meta.plugindesc += ' ' + line.trim()
   })
   meta.help = meta.help.replace(/\s+$/, '')
-  meta.params.forEach((p) => {
-    p.typeInfo = classifyParam(p)
-    p.group = p.typeInfo.kind === 'group'
+  finalizeFields(meta.params)
+  meta.commands.forEach((cmd) => {
+    cmd.desc = String(cmd.desc || '').replace(/\s+$/, '')
+    finalizeFields(cmd.args)
   })
   return meta
 }

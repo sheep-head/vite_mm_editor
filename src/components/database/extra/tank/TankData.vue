@@ -1,22 +1,16 @@
 <template>
   <div class="div full-height">
     <section class="el-container full-height">
-      <div class="list-slider">
-        <div class="item-list" @scroll="handleScroll">
-          <ul>
-            <template v-for="(item,index) in dataList" :key="index">
-              <li v-if="item" tabindex="0" data-editor-list-item :title="item.name" :style="{color:item.c || ''}" @click="selectItem(item); $event.currentTarget.focus()" @contextmenu.prevent.stop="selectItem(item,$event); $event.currentTarget.focus()" :class="[currentItem.id === item.id ? 'active' : '' ]">{{index + 1}}:{{item.name}}</li>
-            </template>
-          </ul>
-          <ul v-show="menu.visible" :style="{left:menu.left+'px',top:menu.top+'px'}" class="contextmenu">
-            <li @click="$clearItem">清空</li>
-            <li @click="$deleteItem">删除</li>
-            <li @click="$onCopy">复制</li>
-            <li @click="">粘贴</li>
-          </ul>
-        </div>
-        <el-button class="add-item-btn" @click="$addItem">add + </el-button>
-      </div>
+      <editor-side-list
+        :items="dataList"
+        :current-id="currentItem.id"
+        label-key="name"
+        @select="selectItem"
+        @add="$addItem"
+        @clear="$clearItem"
+        @delete="$deleteItem"
+        @copy="$onCopy"
+        @paste="$onPaste" />
       <main class="el-main" v-if="currentItem.id">
         <el-form ref="loginForm" class="login-form fixed-width" label-width="70px" :model="currentItem">
           <el-row >
@@ -222,13 +216,15 @@ import { mapState } from 'vuex'
 import { CONTEXTMENU_SLOT } from '@/mixins/contextmenu'
 import { useEditorData } from '@/composables/useEditorData'
 import Drag from '@/components/Draggable.vue'
+import EditorSideList from '@/components/shared/EditorSideList.vue'
 
 const tankStore = useEditorData({ fileName: 'TankData' })
 
 export default {
   name: 'TankData',
   components: {
-    Drag
+    Drag,
+    EditorSideList,
   },
   mixins:[CONTEXTMENU_SLOT],
   data() {
@@ -292,7 +288,7 @@ export default {
       this.dialogVisible = false;
       this.imageSrc = '';
     },
-    selectItem(item,e){
+    selectItem(item){
       this.watcher && this.watcher();
       if(item){
         this.currentItem = item;
@@ -304,9 +300,6 @@ export default {
             deep:true
           });
         }
-      }
-      if(e){
-        this.openMenu(e);
       }
     },
     addSlot(type){

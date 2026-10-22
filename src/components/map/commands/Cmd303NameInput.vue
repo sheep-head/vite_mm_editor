@@ -1,9 +1,15 @@
 <template>
-  <el-dialog :model-value="modelValue" title="名字输入处理" width="400px" append-to-body destroy-on-close :close-on-click-modal="false" @update:model-value="$emit('update:modelValue', $event)">
+  <el-dialog
+    :model-value="modelValue"
+    title="名字输入处理"
+    width="400px"
+    append-to-body
+    destroy-on-close
+    :close-on-click-modal="false"
+    @update:model-value="$emit('update:modelValue', $event)">
     <el-form size="small" label-width="80px">
       <el-form-item label="角色">
-        <el-input-number v-model="actorId" :min="1" controls-position="right" />
-        <el-button size="small" @click="pickerVisible = true">...</el-button>
+        <id-name-field v-model="actorId" type="actor" width="220px" :allow-none="false" />
       </el-form-item>
       <el-form-item label="最大字数">
         <el-input-number v-model="maxCount" :min="1" :max="16" controls-position="right" />
@@ -13,17 +19,20 @@
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
       <el-button type="primary" @click="ok">确定</el-button>
     </template>
-    <id-name-picker-dialog v-model="pickerVisible" type="actor" :model-id="actorId" @confirm="(id) => (actorId = id)" />
   </el-dialog>
 </template>
+
 <script>
-import IdNamePickerDialog from '../pickers/IdNamePickerDialog.vue'
+import IdNameField from '@/components/database/shared/IdNameField.vue'
+
 export default {
   name: 'Cmd303NameInput',
-  components: { IdNamePickerDialog },
+  components: { IdNameField },
   props: { modelValue: Boolean, command: Object },
   emits: ['update:modelValue', 'confirm'],
-  data() { return { actorId: 1, maxCount: 8, pickerVisible: false } },
+  data() {
+    return { actorId: 1, maxCount: 8 }
+  },
   watch: {
     modelValue: {
       immediate: true,
@@ -37,11 +46,13 @@ export default {
   },
   methods: {
     ok() {
-      this.$emit('confirm', [{
-        code: 303,
-        indent: (this.command && this.command.indent) || 0,
-        parameters: [this.actorId, this.maxCount],
-      }])
+      this.$emit('confirm', [
+        {
+          code: 303,
+          indent: (this.command && this.command.indent) || 0,
+          parameters: [this.actorId, this.maxCount],
+        },
+      ])
       this.$emit('update:modelValue', false)
     },
   },

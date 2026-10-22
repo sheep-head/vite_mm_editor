@@ -61,7 +61,7 @@
 
     <map-designation-dialog
       v-model="designVisible"
-      :map-id="mapId"
+      :map-id="mapId || 1"
       :x="x"
       :y="y"
       @confirm="onDesign" />

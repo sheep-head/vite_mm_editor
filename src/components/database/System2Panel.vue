@@ -15,78 +15,111 @@
       <db-group-box title="物品类别">
         <el-checkbox v-for="(label, i) in itemLabels" :key="'c' + i" v-model="data.itemCategories[i]">{{ label }}</el-checkbox>
       </db-group-box>
+
+      <db-group-box title="[侧视]魔法技能">
+        <div class="magic-head">技能类型</div>
+        <focus-list
+          v-model="magicFocus"
+          :items="data.magicSkills"
+          empty-text="（无）"
+          @activate="onMagicActivate"
+          @remove="removeMagic"
+          @insert="addMagic"
+          @contextmenu="onMagicCtx">
+          <template #default="{ item }">{{ skillTypeName(item) }}</template>
+        </focus-list>
+      </db-group-box>
+
       <db-group-box title="[侧视]攻击动作">
-        <el-table :data="data.attackMotions" size="small" max-height="220">
-          <el-table-column label="类型" width="90">
-            <template #default="{ $index }">{{ motionTypeLabel($index) }}</template>
-          </el-table-column>
-          <el-table-column label="动作" width="110">
-            <template #default="{ row }">
-              <el-select v-model="row.type" size="small">
-                <el-option v-for="o in motionOptions" :key="o.value" :value="o.value" :label="o.label" />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="图像" min-width="110">
-            <template #default="{ row }">
-              <el-select v-model="row.weaponImageId" size="small">
-                <el-option v-for="o in weaponImages" :key="o.value" :value="o.value" :label="o.label" />
-              </el-select>
-            </template>
-          </el-table-column>
-        </el-table>
+        <table class="motion-table">
+          <thead>
+            <tr>
+              <th class="col-type">类型</th>
+              <th class="col-motion">动作</th>
+              <th class="col-img">图像</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, i) in data.attackMotions" :key="i">
+              <td class="col-type">{{ motionTypeLabel(i) }}</td>
+              <td class="col-motion">
+                <el-select v-model="row.type" size="small">
+                  <el-option v-for="o in motionOptions" :key="o.value" :value="o.value" :label="o.label" />
+                </el-select>
+              </td>
+              <td class="col-img">
+                <el-select v-model="row.weaponImageId" size="small">
+                  <el-option v-for="o in weaponImages" :key="o.value" :value="o.value" :label="o.label" />
+                </el-select>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </db-group-box>
     </div>
-    <db-group-box title="[侧视]魔法技能" class="s2-magic">
-      <ul>
-        <li v-for="(id, i) in data.magicSkills" :key="i">
-          <el-select v-model="data.magicSkills[i]" size="small" style="width: 160px">
-            <el-option v-for="o in skillTypeOptions" :key="o.value" :value="o.value" :label="o.label" />
-          </el-select>
-          <el-button link type="danger" @click="data.magicSkills.splice(i, 1)">删除</el-button>
-        </li>
-      </ul>
-      <el-button size="small" @click="data.magicSkills.push(1)">添加</el-button>
-    </db-group-box>
+
     <db-group-box title="进阶设置" class="s2-adv">
-      <el-form label-width="120px" size="small">
-        <el-form-item label="游戏编码">
-          <el-input-number v-model="data.advanced.gameId" :controls="false" />
-        </el-form-item>
-        <el-form-item label="画面宽度">
-          <el-input-number v-model="data.advanced.screenWidth" :controls="false" />
-        </el-form-item>
-        <el-form-item label="画面高度">
-          <el-input-number v-model="data.advanced.screenHeight" :controls="false" />
-        </el-form-item>
-        <el-form-item label="界面区域宽度">
-          <el-input-number v-model="data.advanced.uiAreaWidth" :controls="false" />
-        </el-form-item>
-        <el-form-item label="界面区域高度">
-          <el-input-number v-model="data.advanced.uiAreaHeight" :controls="false" />
-        </el-form-item>
-        <el-form-item label="主字体文件名">
-          <el-input v-model="data.advanced.mainFontFilename" />
-        </el-form-item>
-        <el-form-item label="数字字体文件名">
-          <el-input v-model="data.advanced.numberFontFilename" />
-        </el-form-item>
-        <el-form-item label="后备字体">
-          <el-input v-model="data.advanced.fallbackFonts" />
-        </el-form-item>
-        <el-form-item label="字体大小">
-          <el-input-number v-model="data.advanced.fontSize" :controls="false" />
-        </el-form-item>
-        <el-form-item label="窗口不透明度">
-          <el-input-number v-model="data.advanced.windowOpacity" :min="0" :max="255" :controls="false" />
-        </el-form-item>
-      </el-form>
+      <table class="adv-table">
+        <thead>
+          <tr>
+            <th class="adv-name">名称</th>
+            <th class="adv-val">值</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in advancedRows" :key="row.key">
+            <td class="adv-name">{{ row.label }}</td>
+            <td class="adv-val">
+              <el-input-number
+                v-if="row.kind === 'number'"
+                v-model="data.advanced[row.key]"
+                size="small"
+                :controls="false"
+                :min="row.min"
+                :max="row.max"
+                class="adv-input" />
+              <el-input
+                v-else
+                v-model="data.advanced[row.key]"
+                size="small"
+                class="adv-input" />
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </db-group-box>
+
+    <popup-context-menu
+      :visible="menu.visible"
+      :x="menu.x"
+      :y="menu.y"
+      @update:visible="(v) => (menu.visible = v)">
+      <template #default="{ action }">
+        <li @click="action(() => addMagic())">添加</li>
+        <li :class="{ disabled: !data.magicSkills.length }" @click="action(() => editMagic(magicFocus))">更改</li>
+        <li :class="{ disabled: !data.magicSkills.length }" @click="action(() => removeMagic(magicFocus))">删除</li>
+        <li class="sep" />
+        <li :class="{ disabled: !canMagicMove(-1) }" @click="action(() => moveMagic(-1))">上移</li>
+        <li :class="{ disabled: !canMagicMove(1) }" @click="action(() => moveMagic(1))">下移</li>
+      </template>
+    </popup-context-menu>
+
+    <el-dialog v-model="magicPickVisible" title="技能类型" width="360px" append-to-body :close-on-click-modal="false">
+      <el-select v-model="magicPickId" size="small" style="width: 100%" filterable>
+        <el-option v-for="o in skillTypeOptions" :key="o.value" :value="o.value" :label="o.label" />
+      </el-select>
+      <template #footer>
+        <el-button @click="magicPickVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmMagicPick">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script>
 import DbGroupBox from './shared/DbGroupBox.vue'
+import FocusList from '@/components/shared/FocusList.vue'
+import PopupContextMenu from '@/components/shared/PopupContextMenu.vue'
 import { typeList, typeOptions } from './shared/systemLookups'
 
 const MENU = ['物品', '技能', '装备', '状态', '整队', '保存']
@@ -102,13 +135,19 @@ const WEAPON_IMAGES = [
 
 export default {
   name: 'System2Panel',
-  components: { DbGroupBox },
+  components: { DbGroupBox, FocusList, PopupContextMenu },
   props: { data: { type: Object, required: true } },
   data() {
     return {
       menuLabels: MENU,
       itemLabels: ITEMS,
       motionOptions: MOTIONS,
+      magicFocus: 0,
+      magicPickVisible: false,
+      magicPickMode: 'add',
+      magicPickIndex: -1,
+      magicPickId: 1,
+      menu: { visible: false, x: 0, y: 0 },
     }
   },
   computed: {
@@ -118,11 +157,92 @@ export default {
     weaponImages() {
       return WEAPON_IMAGES.map((label, value) => ({ value, label }))
     },
+    advancedRows() {
+      const adv = this.data.advanced || {}
+      const rows = [
+        { key: 'gameId', label: '游戏编码', kind: 'number' },
+        { key: 'screenWidth', label: '画面宽度', kind: 'number' },
+        { key: 'screenHeight', label: '画面高度', kind: 'number' },
+        { key: 'uiAreaWidth', label: '界面区域宽度', kind: 'number' },
+        { key: 'uiAreaHeight', label: '界面区域高度', kind: 'number' },
+        { key: 'mainFontFilename', label: '主字体名称', kind: 'text' },
+        { key: 'numberFontFilename', label: '数字字体文件名', kind: 'text' },
+        { key: 'fallbackFonts', label: '后备字体', kind: 'text' },
+        { key: 'fontSize', label: '字体大小', kind: 'number' },
+        { key: 'windowOpacity', label: '窗口不透明度', kind: 'number', min: 0, max: 255 },
+      ]
+      if (adv.screenScale != null) rows.push({ key: 'screenScale', label: '画面缩放', kind: 'number' })
+      if (adv.picturesUpperLimit != null) {
+        rows.push({ key: 'picturesUpperLimit', label: '图片上限', kind: 'number' })
+      }
+      return rows
+    },
+  },
+  mounted() {
+    this.ensureMotions()
   },
   methods: {
+    ensureMotions() {
+      const types = typeList('weaponTypes')
+      const need = Math.max(1, (types.length || 1) - 1)
+      while (this.data.attackMotions.length < need) {
+        this.data.attackMotions.push({ type: 0, weaponImageId: 0 })
+      }
+    },
     motionTypeLabel(index) {
       const types = typeList('weaponTypes')
       return types[index + 1] || (index === 0 ? '空手' : `类型${index}`)
+    },
+    skillTypeName(id) {
+      const o = this.skillTypeOptions.find((x) => x.value === id)
+      return (o && o.label) || String(id)
+    },
+    onMagicCtx({ event }) {
+      this.menu = { visible: true, x: event.clientX, y: event.clientY }
+    },
+    onMagicActivate(i) {
+      if (i < 0 || !(this.data.magicSkills || []).length) this.addMagic()
+      else this.editMagic(i)
+    },
+    addMagic() {
+      this.magicPickMode = 'add'
+      this.magicPickId = (this.skillTypeOptions[0] && this.skillTypeOptions[0].value) || 1
+      this.magicPickVisible = true
+    },
+    editMagic(i) {
+      if (i < 0 || i >= (this.data.magicSkills || []).length) return
+      this.magicPickMode = 'edit'
+      this.magicPickIndex = i
+      this.magicPickId = this.data.magicSkills[i] || 1
+      this.magicPickVisible = true
+    },
+    confirmMagicPick() {
+      if (this.magicPickMode === 'edit' && this.magicPickIndex >= 0) {
+        this.data.magicSkills.splice(this.magicPickIndex, 1, this.magicPickId)
+        this.magicFocus = this.magicPickIndex
+      } else {
+        this.data.magicSkills.push(this.magicPickId)
+        this.magicFocus = this.data.magicSkills.length - 1
+      }
+      this.magicPickVisible = false
+    },
+    removeMagic(i) {
+      if (i < 0 || i >= (this.data.magicSkills || []).length) return
+      this.data.magicSkills.splice(i, 1)
+      this.magicFocus = Math.min(i, Math.max(0, this.data.magicSkills.length - 1))
+    },
+    canMagicMove(dir) {
+      const j = this.magicFocus + dir
+      return this.magicFocus >= 0 && j >= 0 && j < (this.data.magicSkills || []).length
+    },
+    moveMagic(dir) {
+      if (!this.canMagicMove(dir)) return
+      const i = this.magicFocus
+      const j = i + dir
+      const arr = this.data.magicSkills
+      const [x] = arr.splice(i, 1)
+      arr.splice(j, 0, x)
+      this.magicFocus = j
     },
   },
 }
@@ -131,29 +251,76 @@ export default {
 <style scoped>
 .s2 {
   display: grid;
-  grid-template-columns: 1.3fr 0.8fr 1fr;
-  gap: 8px;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 10px;
   align-items: start;
+  height: 100%;
+  min-height: 0;
 }
 .s2-left {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
 }
 .s2-left :deep(.el-checkbox),
 .s2 :deep(.el-radio) {
   display: flex;
   margin-right: 8px;
 }
-ul {
-  list-style: none;
-  margin: 0 0 6px;
-  padding: 0;
+.magic-head {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 0 4px;
 }
-li {
+.s2-left :deep(.focus-list) {
+  min-height: 64px;
+  max-height: 140px;
+}
+.motion-table,
+.adv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.motion-table th,
+.motion-table td,
+.adv-table th,
+.adv-table td {
+  border-bottom: 1px solid var(--app-border, #eee);
+  padding: 4px 6px;
+  text-align: left;
+}
+.motion-table th,
+.adv-table th {
+  background: #f0f2f5;
+  font-weight: 600;
+}
+.motion-table tbody tr:nth-child(even),
+.adv-table tbody tr:nth-child(even) {
+  background: #f7f8fa;
+}
+.col-type {
+  width: 72px;
+}
+.col-motion {
+  width: 110px;
+}
+.col-img {
+  min-width: 110px;
+}
+.s2-adv {
+  min-height: 0;
   display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-bottom: 4px;
+  flex-direction: column;
+}
+.adv-name {
+  width: 42%;
+}
+.adv-val {
+  width: 58%;
+}
+.adv-input {
+  width: 100%;
 }
 </style>

@@ -1,5 +1,13 @@
 <template>
   <div class="spirit-page full-height">
+    <div class="spirit-tabbar">
+      <el-radio-group v-model="tab" size="small">
+        <el-radio-button value="global">全局</el-radio-button>
+        <el-radio-button value="traits">特性库</el-radio-button>
+        <el-radio-button value="trails">拖尾库</el-radio-button>
+        <el-radio-button value="spirits">精灵列表</el-radio-button>
+      </el-radio-group>
+    </div>
     <div class="spirit-layout">
       <aside class="spirit-side">
         <div class="side-title">{{ sideTitle }}</div>
@@ -780,14 +788,6 @@ export default {
         if (this.ready) this.changed = true
       },
     },
-    '$route.meta.spiritTab': {
-      immediate: true,
-      handler(v) {
-        if (v === 'global' || v === 'traits' || v === 'trails' || v === 'spirits') {
-          this.tab = v
-        }
-      },
-    },
   },
   methods: {
     qualityColor(key) {
@@ -984,11 +984,7 @@ export default {
         rate: 0.1,
       }
       this.selectedTraitKey = key
-      if (this.$route.path !== '/extra/spirit/Traits') {
-        this.$router.push('/extra/spirit/Traits')
-      } else {
-        this.tab = 'traits'
-      }
+      this.tab = 'traits'
     },
     removeTrait() {
       if (!this.selectedTraitKey) return
@@ -1000,11 +996,7 @@ export default {
       let key = 'trail' + Date.now().toString(36)
       this.config.trails[key] = createEmptyTrailEntry()
       this.selectedTrailKey = key
-      if (this.$route.path !== '/extra/spirit/Trails') {
-        this.$router.push('/extra/spirit/Trails')
-      } else {
-        this.tab = 'trails'
-      }
+      this.tab = 'trails'
     },
     removeTrail() {
       if (!this.selectedTrailKey || !this.config.trails) return
@@ -1022,11 +1014,7 @@ export default {
       const id = (this.config.spirits.reduce((m, s) => Math.max(m, Number(s.actorId) || 0), 0) || 0) + 1
       this.config.spirits.push(createEmptySpirit(id))
       this.spiritIndex = this.config.spirits.length - 1
-      if (this.$route.path !== '/extra/spirit/Spirits') {
-        this.$router.push('/extra/spirit/Spirits')
-      } else {
-        this.tab = 'spirits'
-      }
+      this.tab = 'spirits'
     },
     dupSpirit() {
       if (!this.currentSpirit) return
@@ -1076,10 +1064,20 @@ export default {
 .spirit-page {
   height: 100%;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.spirit-tabbar {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-bottom: 1px solid #ebeef5;
+  background: #fff;
 }
 .spirit-layout {
   display: flex;
-  height: 100%;
+  flex: 1;
+  height: auto;
   min-height: 0;
   gap: 0;
 }

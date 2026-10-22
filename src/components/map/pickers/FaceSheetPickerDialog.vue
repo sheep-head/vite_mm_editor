@@ -38,6 +38,7 @@
             @dblclick="confirm" />
         </div>
         <div class="sheet-meta">
+          <span v-if="imageSizeText" class="sheet-size">{{ imageSizeText }}</span>
           <span v-if="maxIndex > 0">索引 {{ selectedIndex }}</span>
           <span v-else-if="selectedName">整张（$ 单格脸图）</span>
           <el-input-number
@@ -83,6 +84,7 @@ export default {
       selectedName: '',
       selectedIndex: 0,
       maxIndex: 0,
+      imageSizeText: '',
     }
   },
   created() {
@@ -127,6 +129,7 @@ export default {
     async reloadImage() {
       this.img = null
       this.maxIndex = 0
+      this.imageSizeText = ''
       if (!this.selectedName) {
         this.paint()
         return
@@ -134,6 +137,7 @@ export default {
       const abs = imageAbsPath('faces', this.selectedName)
       const loaded = await loadImageFile(abs)
       this.img = loaded ? markRaw(loaded) : null
+      this.imageSizeText = this.img ? `${this.img.width} × ${this.img.height}` : ''
       if (this.img) {
         const layout = faceSheetLayout(this.img, this.selectedName)
         this.maxIndex = layout.maxIndex
@@ -238,5 +242,10 @@ export default {
   align-items: center;
   gap: 12px;
   font-size: 13px;
+  flex-wrap: wrap;
+}
+.sheet-size {
+  color: var(--app-text-muted, #909399);
+  font-variant-numeric: tabular-nums;
 }
 </style>

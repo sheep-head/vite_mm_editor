@@ -26,8 +26,12 @@
             v-if="tab.kind === 'system' && activeTab === tab.name"
             :ref="(el) => setPanelRef(tab.name, el)"
             :section="tab.section" />
+          <database-extra-panel
+            v-else-if="tab.kind === 'extra' && activeTab === tab.name"
+            :ref="(el) => setPanelRef(tab.name, el)"
+            @dirty-change="(d) => onDirty(tab.name, d)" />
           <database-array-panel
-            v-else-if="tab.kind !== 'system' && activeTab === tab.name"
+            v-else-if="tab.kind !== 'system' && tab.kind !== 'extra' && activeTab === tab.name"
             :ref="(el) => setPanelRef(tab.name, el)"
             :file-name="tab.fileName"
             :fields="tab.fields"
@@ -51,6 +55,7 @@
 <script>
 import { mapGetters } from 'vuex'
 import DatabaseArrayPanel from './DatabaseArrayPanel.vue'
+import DatabaseExtraPanel from './DatabaseExtraPanel.vue'
 import SystemSectionPanel from './SystemSectionPanel.vue'
 import { DATABASE_TABS } from './dbFieldPresets'
 import { SYSTEM_TAB_NAMES, systemState, resetSystemSession } from './shared/systemSession'
@@ -59,7 +64,7 @@ import { fs } from '@/utils/nw'
 
 export default {
   name: 'DatabaseDialog',
-  components: { DatabaseArrayPanel, SystemSectionPanel },
+  components: { DatabaseArrayPanel, DatabaseExtraPanel, SystemSectionPanel },
   props: {
     modelValue: { type: Boolean, default: false },
   },

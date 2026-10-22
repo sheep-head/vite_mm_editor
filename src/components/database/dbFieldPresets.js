@@ -177,4 +177,5 @@ export const DATABASE_TABS = [
   { name: 'System2', label: '系统 2', kind: 'system', section: 's2' },
   { name: 'Types', label: '类型', kind: 'system', section: 'types' },
   { name: 'Terms', label: '用语', kind: 'system', section: 'terms' },
+  { name: 'Extra', label: '扩展', kind: 'extra' },
 ]

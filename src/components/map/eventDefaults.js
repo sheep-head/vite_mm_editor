@@ -517,7 +517,11 @@ function buildExtra(cmd) {
   if (code === 331 || code === 332) return `敌人${p[0]}`
   if (code === 355 || code === 655) return p[0] != null ? String(p[0]) : ''
   if (code === 356) return p[0] != null ? String(p[0]) : ''
-  if (code === 357) return [p[0], p[1]].filter((x) => x != null && x !== '').join(' ')
+  if (code === 357) {
+    const plugin = p[0] != null ? String(p[0]) : ''
+    const cmdText = p[2] != null && p[2] !== '' ? String(p[2]) : p[1] != null ? String(p[1]) : ''
+    return [plugin, cmdText].filter((x) => x !== '').join(' ')
+  }
   if (code === 401 || code === 405 || code === 408) return p[0] != null ? String(p[0]) : ''
   if (code === 402) return p[1] != null ? String(p[1]) : ''
   if (code === 605) return `商品#${p[1]}`
@@ -611,7 +615,10 @@ export function formatCommandParts(cmd, prevColor) {
   if (code === 408) {
     return { indent, mark: '：', kind: 'commentCont', color, pad: '注释：', label: '', body: bodyRaw, code }
   }
-  if (code === 401 || code === 405 || code === 505 || code === 605 || code === 657) {
+  if (code === 657) {
+    return { indent, mark: '：', kind: 'cont', color, pad: '插件指令：', label: '', body: bodyRaw, code }
+  }
+  if (code === 401 || code === 405 || code === 505 || code === 605) {
     return { indent, mark: '：', kind: 'cont', color, label: '', body: bodyRaw, code }
   }
   if (code === 412) {

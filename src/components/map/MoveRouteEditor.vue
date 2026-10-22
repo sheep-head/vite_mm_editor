@@ -64,39 +64,38 @@
       <el-button type="primary" @click="ok">确定</el-button>
     </template>
 
-    <teleport to="body">
-      <ul
-        v-show="menu.visible"
-        ref="menuEl"
-        class="contextmenu mr-ctx"
-        :style="{ left: menu.x + 'px', top: menu.y + 'px' }"
-        @mousedown.stop
-        @contextmenu.prevent>
-        <li :class="{ disabled: !canEdit }" @click="menuAction(editSelected)">
+    <popup-context-menu
+      menu-class="mr-ctx"
+      :visible="menu.visible"
+      :x="menu.x"
+      :y="menu.y"
+      @update:visible="(v) => (menu.visible = v)">
+      <template #default="{ action }">
+        <li :class="{ disabled: !canEdit }" @click="action(editSelected)">
           <span>编辑...</span><span class="sc">Space</span>
         </li>
         <li class="sep" />
-        <li :class="{ disabled: !canCopy }" @click="menuAction(cutSelected)">
+        <li :class="{ disabled: !canCopy }" @click="action(cutSelected)">
           <span>剪切</span><span class="sc">Ctrl+X</span>
         </li>
-        <li :class="{ disabled: !canCopy }" @click="menuAction(copySelected)">
+        <li :class="{ disabled: !canCopy }" @click="action(copySelected)">
           <span>复制</span><span class="sc">Ctrl+C</span>
         </li>
-        <li :class="{ disabled: !clipboard.length }" @click="menuAction(pasteClipboard)">
+        <li :class="{ disabled: !clipboard.length }" @click="action(pasteClipboard)">
           <span>粘贴</span><span class="sc">Ctrl+V</span>
         </li>
-        <li :class="{ disabled: !canCopy }" @click="menuAction(deleteSelected)">
+        <li :class="{ disabled: !canCopy }" @click="action(deleteSelected)">
           <span>删除</span><span class="sc">Del</span>
         </li>
-        <li @click="menuAction(selectAll)">
+        <li @click="action(selectAll)">
           <span>全选</span><span class="sc">Ctrl+A</span>
         </li>
         <li class="sep" />
-        <li @click="menuAction(insertBlank)">插入</li>
-        <li :class="{ disabled: !canMove(-1) }" @click="menuAction(() => moveSelected(-1))">上移</li>
-        <li :class="{ disabled: !canMove(1) }" @click="menuAction(() => moveSelected(1))">下移</li>
-      </ul>
-    </teleport>
+        <li @click="action(insertBlank)">插入</li>
+        <li :class="{ disabled: !canMove(-1) }" @click="action(() => moveSelected(-1))">上移</li>
+        <li :class="{ disabled: !canMove(1) }" @click="action(() => moveSelected(1))">下移</li>
+      </template>
+    </popup-context-menu>
 
     <el-dialog v-model="paramDlg" :title="paramTitle" width="360px" append-to-body :close-on-click-modal="false">
       <el-form size="small" label-width="88px">
@@ -176,6 +175,7 @@ import IdNameField from '@/components/database/shared/IdNameField.vue'
 import CharacterSheetPickerDialog from '@/components/map/pickers/CharacterSheetPickerDialog.vue'
 import AudioFilePickerDialog from '@/components/map/pickers/AudioFilePickerDialog.vue'
 import MoveRoutePreviewDialog from '@/components/map/MoveRoutePreviewDialog.vue'
+import PopupContextMenu from '@/components/shared/PopupContextMenu.vue'
 import { loadSystem } from '@/components/database/shared/systemLookups'
 import { MOVE_SPEED_OPTIONS, MOVE_FREQ_OPTIONS } from './eventDefaults'
 
@@ -264,6 +264,7 @@ export default {
     CharacterSheetPickerDialog,
     AudioFilePickerDialog,
     MoveRoutePreviewDialog,
+    PopupContextMenu,
   },
   props: {
     modelValue: { type: Boolean, default: false },
@@ -370,12 +371,6 @@ export default {
         this.clipboard = routeClipboard
       },
     },
-  },
-  created() {
-    this._onMenuAway = () => this.closeMenu()
-  },
-  beforeUnmount() {
-    this.closeMenu()
   },
   methods: {
     isSelected(i) {
@@ -686,30 +681,9 @@ export default {
         }
       }
       this.menu = { visible: true, x: e.clientX, y: e.clientY }
-      this.$nextTick(() => {
-        const el = this.$refs.menuEl
-        if (!el) return
-        const h = el.offsetHeight || 0
-        const w = el.offsetWidth || 0
-        const pad = 4
-        let x = e.clientX
-        let y = e.clientY
-        if (y + h > window.innerHeight - pad) y = e.clientY - h
-        if (y < pad) y = pad
-        if (x + w > window.innerWidth - pad) x = window.innerWidth - w - pad
-        if (x < pad) x = pad
-        this.menu.x = x
-        this.menu.y = y
-      })
-      window.addEventListener('mousedown', this._onMenuAway)
     },
     closeMenu() {
       this.menu.visible = false
-      window.removeEventListener('mousedown', this._onMenuAway)
-    },
-    menuAction(fn) {
-      this.closeMenu()
-      if (typeof fn === 'function') fn()
     },
     ok() {
       const list = this.steps.map((s) => ({
@@ -801,33 +775,16 @@ export default {
 </style>
 
 <style>
-.mr-ctx {
-  position: fixed;
+.popup-context-menu.mr-ctx {
   z-index: 5000;
   min-width: 160px;
 }
-.mr-ctx li {
+.popup-context-menu.mr-ctx li {
   display: flex;
   justify-content: space-between;
   gap: 24px;
 }
-.mr-ctx li.disabled {
-  opacity: 0.4;
-  pointer-events: none;
-  cursor: default;
-}
-.mr-ctx li.sep {
-  height: 1px;
-  margin: 4px 8px;
-  padding: 0;
-  background: var(--app-border, #444);
-  cursor: default;
-  pointer-events: none;
-}
-.mr-ctx li.sep:hover {
-  background: var(--app-border, #444);
-}
-.mr-ctx .sc {
+.popup-context-menu.mr-ctx .sc {
   opacity: 0.65;
   font-size: 11px;
 }

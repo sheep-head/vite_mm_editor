@@ -89,6 +89,7 @@ const PARAM_LOADERS = {
   Cmd337BattleAnim: () => import('./commands/Cmd337BattleAnim.vue'),
   Cmd339ForceAction: () => import('./commands/Cmd339ForceAction.vue'),
   Cmd355Script: () => import('./commands/Cmd355Script.vue'),
+  Cmd356Plugin: () => import('./commands/Cmd356Plugin.vue'),
   Cmd357Plugin: () => import('./commands/Cmd357Plugin.vue'),
   CmdActorChangeValue: () => import('./commands/CmdActorChangeValue.vue'),
   CmdActorText: () => import('./commands/CmdActorText.vue'),
