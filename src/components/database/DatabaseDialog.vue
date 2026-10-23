@@ -8,37 +8,44 @@
     destroy-on-close
     append-to-body
     :close-on-click-modal="false"
-    @update:model-value="onVisibleChange">
-    <div class="db-dialog-body">
-      <div v-if="dbSkinUrl" class="db-skin" :style="dbSkinStyle" />
-      <el-tabs
-        v-model="activeTab"
-        type="card"
-        class="db-tabs"
-        :before-leave="beforeLeaveTab">
-        <el-tab-pane
-          v-for="tab in tabs"
-          :key="tab.name"
-          :label="tabLabel(tab)"
-          :name="tab.name"
-          lazy>
-          <system-section-panel
-            v-if="tab.kind === 'system' && activeTab === tab.name"
-            :ref="(el) => setPanelRef(tab.name, el)"
-            :section="tab.section" />
-          <database-extra-panel
-            v-else-if="tab.kind === 'extra' && activeTab === tab.name"
-            :ref="(el) => setPanelRef(tab.name, el)"
-            @dirty-change="(d) => onDirty(tab.name, d)" />
-          <database-array-panel
-            v-else-if="tab.kind !== 'system' && tab.kind !== 'extra' && activeTab === tab.name"
-            :ref="(el) => setPanelRef(tab.name, el)"
-            :file-name="tab.fileName"
-            :fields="tab.fields"
-            :editor="tab.editor || ''"
-            @dirty-change="(d) => onDirty(tab.name, d)" />
-        </el-tab-pane>
-      </el-tabs>
+    @update:model-value="onVisibleChange"
+    @opened="onDialogOpened">
+    <div class="db-dialog-body" :style="bodyStyle">
+      <div class="db-dialog-main">
+        <div v-if="dbSkinUrl" class="db-skin" :style="dbSkinStyle" />
+        <el-tabs
+          v-model="activeTab"
+          type="card"
+          class="db-tabs"
+          :before-leave="beforeLeaveTab">
+          <el-tab-pane
+            v-for="tab in tabs"
+            :key="tab.name"
+            :label="tabLabel(tab)"
+            :name="tab.name"
+            lazy>
+            <system-section-panel
+              v-if="tab.kind === 'system' && activeTab === tab.name"
+              :ref="(el) => setPanelRef(tab.name, el)"
+              :section="tab.section" />
+            <database-extra-panel
+              v-else-if="tab.kind === 'extra' && activeTab === tab.name"
+              :ref="(el) => setPanelRef(tab.name, el)"
+              @dirty-change="(d) => onDirty(tab.name, d)" />
+            <database-array-panel
+              v-else-if="tab.kind !== 'system' && tab.kind !== 'extra' && activeTab === tab.name"
+              :ref="(el) => setPanelRef(tab.name, el)"
+              :file-name="tab.fileName"
+              :fields="tab.fields"
+              :editor="tab.editor || ''"
+              @dirty-change="(d) => onDirty(tab.name, d)" />
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+      <div
+        class="db-resize-s"
+        title="拖拽调整高度"
+        @pointerdown="onResizeStart" />
     </div>
     <template #footer>
       <div class="db-footer">
@@ -62,6 +69,15 @@ import { SYSTEM_TAB_NAMES, systemState, resetSystemSession } from './shared/syst
 import { getMapBgSkinPath } from '@/utils/appSettings'
 import { fs } from '@/utils/nw'
 
+const MIN_BODY_H = 360
+/** 标题栏 + 边距 + footer 大约占用 */
+const CHROME_RESERVE = 150
+
+function defaultBodyHeight(maxH) {
+  const vh = window.innerHeight || 800
+  return Math.max(MIN_BODY_H, Math.min(Math.round(vh * 0.78), 720, maxH))
+}
+
 export default {
   name: 'DatabaseDialog',
   components: { DatabaseArrayPanel, DatabaseExtraPanel, SystemSectionPanel },
@@ -77,6 +93,9 @@ export default {
       panelRefs: {},
       switching: false,
       systemBridge: systemState,
+      bodyHeight: 0,
+      _resize: null,
+      _viewportKey: '',
     }
   },
   computed: {
@@ -100,8 +119,113 @@ export default {
     currentDirty() {
       return !!this.dirtyMap[this.activeTab]
     },
+    bodyStyle() {
+      const h = this.bodyHeight || MIN_BODY_H
+      return {
+        height: h + 'px',
+        minHeight: MIN_BODY_H + 'px',
+      }
+    },
+  },
+  mounted() {
+    this.syncBodyHeight(false)
+    this._onWinResize = () => this.onViewportChange()
+    window.addEventListener('resize', this._onWinResize)
+  },
+  beforeUnmount() {
+    window.removeEventListener('resize', this._onWinResize)
+    this.detachResizeListeners()
   },
   methods: {
+    maxBodyHeight() {
+      const vh = window.innerHeight || 800
+      const vw = window.innerWidth || 1200
+      const top = Math.round(vh * 0.04)
+      // 窄屏再多留一点，避免贴边溢出
+      const sidePad = vw < 900 ? 24 : 8
+      return Math.max(MIN_BODY_H, vh - top - CHROME_RESERVE - sidePad)
+    },
+    /** 保存偏好钳制到当前视口可用范围；无偏好则用默认自适应高度 */
+    preferredBodyHeight() {
+      const saved = this.editorUi && Number(this.editorUi.dbDialogHeight)
+      const maxH = this.maxBodyHeight()
+      if (Number.isFinite(saved) && saved > 0) {
+        return Math.max(MIN_BODY_H, Math.min(Math.round(saved), maxH))
+      }
+      return defaultBodyHeight(maxH)
+    },
+    syncBodyHeight(persistClamp) {
+      const next = this.preferredBodyHeight()
+      this.bodyHeight = next
+      this._viewportKey = `${window.innerWidth}x${window.innerHeight}`
+      if (persistClamp) this.persistIfClamped(next)
+    },
+    /** 视口变小导致显示高度被钳制时，把偏好改成当前可用高度（自适应修正） */
+    persistIfClamped(effectiveH) {
+      const saved = this.editorUi && Number(this.editorUi.dbDialogHeight)
+      if (!Number.isFinite(saved) || saved <= 0) return
+      if (effectiveH < saved) {
+        this.$store.dispatch('updateEditorUi', { dbDialogHeight: effectiveH })
+      }
+    },
+    onDialogOpened() {
+      this.syncBodyHeight(false)
+    },
+    onViewportChange() {
+      const key = `${window.innerWidth}x${window.innerHeight}`
+      const maxH = this.maxBodyHeight()
+      if (key === this._viewportKey) {
+        if (this.bodyHeight > maxH) {
+          this.bodyHeight = maxH
+          this.persistIfClamped(maxH)
+        }
+        return
+      }
+      this._viewportKey = key
+      // 屏幕宽高变化：按偏好重算并钳制；若超出则写回自适应后的高度
+      const next = this.preferredBodyHeight()
+      this.bodyHeight = next
+      this.persistIfClamped(next)
+    },
+    onResizeStart(e) {
+      if (e.button !== 0) return
+      e.preventDefault()
+      e.stopPropagation()
+      this._resize = {
+        startY: e.clientY,
+        startH: this.bodyHeight || this.preferredBodyHeight(),
+      }
+      document.body.classList.add('db-dialog-resizing')
+      try {
+        e.currentTarget.setPointerCapture?.(e.pointerId)
+      } catch (err) {
+        /* ignore */
+      }
+      window.addEventListener('pointermove', this.onResizeMove)
+      window.addEventListener('pointerup', this.onResizeEnd)
+      window.addEventListener('pointercancel', this.onResizeEnd)
+    },
+    onResizeMove(e) {
+      if (!this._resize) return
+      const dy = e.clientY - this._resize.startY
+      const maxH = this.maxBodyHeight()
+      this.bodyHeight = Math.max(MIN_BODY_H, Math.min(this._resize.startH + dy, maxH))
+    },
+    onResizeEnd() {
+      if (!this._resize) return
+      this._resize = null
+      this.detachResizeListeners()
+      document.body.classList.remove('db-dialog-resizing')
+      const h = Math.round(this.bodyHeight)
+      this.bodyHeight = h
+      this.$store.dispatch('updateEditorUi', { dbDialogHeight: h })
+    },
+    detachResizeListeners() {
+      window.removeEventListener('pointermove', this.onResizeMove)
+      window.removeEventListener('pointerup', this.onResizeEnd)
+      window.removeEventListener('pointercancel', this.onResizeEnd)
+      document.body.classList.remove('db-dialog-resizing')
+    },
     tabLabel(tab) {
       const mark = this.dirtyMap[tab.name] ? ' *' : ''
       return tab.label + mark
@@ -187,6 +311,9 @@ export default {
     },
   },
   watch: {
+    modelValue(v) {
+      if (v) this.$nextTick(() => this.syncBodyHeight(false))
+    },
     'systemBridge.dirty'(d) {
       const patch = {}
       SYSTEM_TAB_NAMES.forEach((n) => {
@@ -200,8 +327,14 @@ export default {
 
 <style scoped>
 .db-dialog-body {
-  height: min(78vh, 720px);
-  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.db-dialog-main {
+  flex: 1;
+  min-height: 0;
   position: relative;
 }
 .db-skin {
@@ -231,6 +364,42 @@ export default {
 .db-tabs :deep(.el-tab-pane) {
   height: 100%;
 }
+.db-resize-s {
+  flex-shrink: 0;
+  height: 16px;
+  cursor: ns-resize;
+  position: relative;
+  z-index: 5;
+  touch-action: none;
+  user-select: none;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.04), rgba(0, 0, 0, 0.08));
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+}
+.db-resize-s::before,
+.db-resize-s::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 48px;
+  height: 3px;
+  margin-left: -24px;
+  border-radius: 2px;
+  background: rgba(100, 100, 100, 0.55);
+  transition: background 0.15s ease;
+}
+.db-resize-s::before {
+  top: 4px;
+}
+.db-resize-s::after {
+  top: 9px;
+}
+.db-resize-s:hover {
+  background: linear-gradient(to bottom, rgba(64, 158, 255, 0.08), rgba(64, 158, 255, 0.16));
+}
+.db-resize-s:hover::before,
+.db-resize-s:hover::after {
+  background: rgba(64, 158, 255, 0.85);
+}
 .db-footer {
   display: flex;
   align-items: center;
@@ -244,5 +413,13 @@ export default {
 }
 .db-dirty-spacer {
   margin-right: auto;
+}
+</style>
+
+<style>
+/* 拖拽改高时禁止选中文字 */
+body.db-dialog-resizing {
+  cursor: ns-resize !important;
+  user-select: none !important;
 }
 </style>

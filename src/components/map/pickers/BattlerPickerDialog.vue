@@ -85,8 +85,14 @@ export default {
   },
   computed: {
     title() {
-      const map = { enemies: '选择敌人战斗图', sv_actors: '选择 SV 角色', sv_enemies: '选择 SV 敌人' }
-      return map[this.folder] || '选择战斗图'
+      const map = {
+        enemies: '选择敌人战斗图',
+        sv_actors: '选择 SV 角色',
+        sv_enemies: '选择 SV 敌人',
+        animations: '选择一个图像',
+        tilesets: '选择图块图像',
+      }
+      return map[this.folder] || '选择图像'
     },
     filtered() {
       const q = (this.query || '').trim().toLowerCase()

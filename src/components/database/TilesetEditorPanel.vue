@@ -1,36 +1,34 @@
 <template>
   <div class="ts" v-if="modelValue">
-    <div class="ts-mid">
+    <!-- 左：基本设置 + 图像 -->
+    <div class="ts-left">
       <db-group-box title="基本设置">
-        <el-form label-width="56px" size="small">
+        <el-form label-width="48px" size="small" @submit.prevent>
           <el-form-item label="名称">
             <el-input v-model="modelValue.name" />
           </el-form-item>
           <el-form-item label="模式">
-            <el-select v-model="modelValue.mode" style="width: 140px">
+            <el-select v-model="modelValue.mode" style="width: 100%">
               <el-option :value="0" label="世界类型" />
               <el-option :value="1" label="区域类型" />
             </el-select>
           </el-form-item>
         </el-form>
-        <div class="slot" v-for="s in slots" :key="s.index">
+      </db-group-box>
+      <db-group-box title="图像" class="ts-images">
+        <div v-for="s in slots" :key="s.index" class="slot">
           <span class="slot-lab">{{ s.label }}</span>
-          <el-input :model-value="nameAt(s.index)" readonly />
-          <el-button size="small" @click="openPick(s.index)">...</el-button>
+          <picker-input-field
+            :model-value="nameAt(s.index)"
+            empty-text="(无)"
+            width="100%"
+            @pick="openPick(s.index)" />
         </div>
       </db-group-box>
     </div>
-    <div class="ts-view">
-      <div class="ts-tools">
-        <el-button
-          v-for="t in tools"
-          :key="t.id"
-          size="small"
-          :type="tool === t.id ? 'primary' : 'default'"
-          @click="onTool(t.id)">
-          {{ t.label }}
-        </el-button>
-      </div>
+
+    <!-- 中：固定画布宽（8×48）+ 滚动条槽，右侧紧挨 -->
+    <div class="ts-center" :style="{ width: previewColW + 'px' }">
       <div class="ts-canvas-wrap">
         <canvas
           ref="cv"
@@ -45,26 +43,41 @@
         <el-radio-button value="D">D</el-radio-button>
         <el-radio-button value="E">E</el-radio-button>
       </el-radio-group>
-      <el-form label-width="40px" size="small">
-        <el-form-item label="备注">
-          <el-input v-model="modelValue.note" type="textarea" :rows="3" />
-        </el-form-item>
-      </el-form>
     </div>
-    <el-dialog v-model="pickVisible" title="选择图块图像" width="360px" append-to-body>
-      <el-input v-model="pickQuery" size="small" clearable placeholder="搜索" />
-      <el-scrollbar max-height="320px">
-        <div class="pick-item" @click="applyName('')">(无)</div>
-        <div v-for="n in filteredNames" :key="n" class="pick-item" @click="applyName(n)">{{ n }}</div>
-      </el-scrollbar>
-    </el-dialog>
+
+    <!-- 右：通行工具 + 备注 -->
+    <div class="ts-right">
+      <div class="ts-tools">
+        <el-button
+          v-for="t in tools"
+          :key="t.id"
+          size="small"
+          class="ts-tool-btn"
+          :type="tool === t.id ? 'primary' : 'default'"
+          @click="onTool(t.id)">
+          {{ t.label }}
+        </el-button>
+      </div>
+      <db-group-box title="备注" class="ts-note">
+        <el-input v-model="modelValue.note" type="textarea" :rows="8" resize="none" />
+      </db-group-box>
+    </div>
+
+    <battler-picker-dialog
+      v-model="pickVisible"
+      folder="tilesets"
+      :model-name="pickName"
+      :show-hue="false"
+      @confirm="onTilesetPicked" />
   </div>
 </template>
 
 <script>
 import { markRaw } from 'vue'
 import DbGroupBox from './shared/DbGroupBox.vue'
-import { listImageNames, imageAbsPath, loadImageFile, tileIdFromCell, TILE_PX } from '@/utils/imgAssets'
+import PickerInputField from './shared/PickerInputField.vue'
+import BattlerPickerDialog from '@/components/map/pickers/BattlerPickerDialog.vue'
+import { imageAbsPath, loadImageFile, tileIdFromCell, TILE_PX } from '@/utils/imgAssets'
 import {
   FLOOR_AUTOTILE_TABLE,
   WALL_AUTOTILE_TABLE,
@@ -77,11 +90,11 @@ import {
 } from '@/components/map/mapAutotile'
 
 const SLOTS = [
-  { index: 0, label: 'A1' },
-  { index: 1, label: 'A2' },
-  { index: 2, label: 'A3' },
-  { index: 3, label: 'A4' },
-  { index: 4, label: 'A5' },
+  { index: 0, label: 'A1 (动画)' },
+  { index: 1, label: 'A2 (地面)' },
+  { index: 2, label: 'A3 (建筑)' },
+  { index: 3, label: 'A4 (墙壁)' },
+  { index: 4, label: 'A5 (普通)' },
   { index: 5, label: 'B' },
   { index: 6, label: 'C' },
   { index: 7, label: 'D' },
@@ -89,6 +102,12 @@ const SLOTS = [
 ]
 const FLAG_LEN = 8192
 const CELL = 48
+/** A/B/C/D/E 预览一律 8 列 → 画布固定宽 */
+const PREVIEW_COLS = 8
+const PREVIEW_CANVAS_W = PREVIEW_COLS * CELL
+/** 纵向滚动条约占位，避免压住画布导致右侧错位 */
+const SCROLLBAR_GUTTER = 16
+const PREVIEW_COL_W = PREVIEW_CANVAS_W + SCROLLBAR_GUTTER + 2
 const A_KIND_COUNTS = [16, 32, 16, 48]
 const A_KIND_BASE = [2048, 2816, 4352, 5888]
 /** 自动图块预览用「整格」形状 */
@@ -98,7 +117,7 @@ const WATERFALL_PREVIEW_SHAPE = 3
 
 export default {
   name: 'TilesetEditorPanel',
-  components: { DbGroupBox },
+  components: { DbGroupBox, PickerInputField, BattlerPickerDialog },
   props: { modelValue: { type: Object, required: true } },
   data() {
     return {
@@ -116,18 +135,11 @@ export default {
       ],
       pickVisible: false,
       pickIndex: 0,
-      pickQuery: '',
-      names: [],
+      pickName: '',
       hitBoxes: [],
       paintGen: 0,
+      previewColW: PREVIEW_COL_W,
     }
-  },
-  computed: {
-    filteredNames() {
-      const q = (this.pickQuery || '').trim().toLowerCase()
-      if (!q) return this.names
-      return this.names.filter((n) => n.toLowerCase().includes(q))
-    },
   },
   watch: {
     modelValue: {
@@ -167,12 +179,12 @@ export default {
     },
     openPick(i) {
       this.pickIndex = i
-      this.pickQuery = ''
-      this.names = listImageNames('tilesets')
+      this.pickName = this.nameAt(i)
       this.pickVisible = true
     },
-    applyName(n) {
-      this.modelValue.tilesetNames.splice(this.pickIndex, 1, n || '')
+    onTilesetPicked(payload) {
+      const name = payload && typeof payload === 'object' ? payload.name || '' : payload || ''
+      this.modelValue.tilesetNames.splice(this.pickIndex, 1, name)
       this.pickVisible = false
       this.repaint()
     },
@@ -253,14 +265,14 @@ export default {
       const img = await this.loadSlot(slotMap[page])
       if (gen !== this.paintGen) return
       // 最多 8 列：原图左 8 列一块、右 8 列接到下方（与 tileId +128 块一致）
-      const dispCols = 8
+      const dispCols = PREVIEW_COLS
       const imgCols = img ? Math.max(1, Math.floor(img.width / TILE_PX)) : 0
       const imgRows = img ? Math.max(1, Math.floor(img.height / TILE_PX)) : 0
       const blocks = img ? Math.max(1, Math.ceil(imgCols / dispCols)) : 0
       const dispRows = imgRows * blocks
       const cw = CELL
       const ch = CELL
-      canvas.width = dispCols * cw
+      canvas.width = PREVIEW_CANVAS_W
       canvas.height = Math.max(dispRows * ch, ch)
       this.fillChecker(ctx, canvas.width, canvas.height)
       if (!img) return
@@ -289,7 +301,7 @@ export default {
       if (gen !== this.paintGen) return
 
       const cell = CELL
-      const cols = 8
+      const cols = PREVIEW_COLS
       const sections = []
       let y = 0
       // 只排已指定图像的分区，空槽不占可编辑格（与原版一致）
@@ -309,7 +321,7 @@ export default {
         y += a5H
       }
 
-      canvas.width = cols * cell
+      canvas.width = PREVIEW_CANVAS_W
       canvas.height = Math.max(cell, y)
       this.fillChecker(ctx, canvas.width, canvas.height)
 
@@ -527,52 +539,109 @@ export default {
 
 <style scoped>
 .ts {
-  display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 8px;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 10px;
   height: 100%;
   min-height: 0;
 }
-.ts-mid, .ts-view {
-  min-width: 0;
+.ts-left {
+  width: 260px;
+  flex-shrink: 0;
   min-height: 0;
-}
-.ts-view {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
-.ts-tools {
+.ts-center {
+  flex: 0 0 auto;
+  min-height: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  flex-direction: column;
+  gap: 8px;
 }
-.ts-canvas-wrap {
+.ts-right {
+  width: 140px;
+  flex-shrink: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ts-images {
   flex: 1;
-  min-height: 200px;
+  min-height: 0;
   overflow: auto;
-  background: #e8e8e8;
-  border: 1px solid var(--el-border-color);
-}
-.ts-cv {
-  display: block;
 }
 .slot {
   display: grid;
-  grid-template-columns: 28px 1fr auto;
-  gap: 4px;
+  grid-template-columns: 72px 1fr;
+  gap: 6px;
   align-items: center;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 .slot-lab {
   font-size: 12px;
+  color: var(--app-text, #303133);
+  white-space: nowrap;
 }
-.pick-item {
-  padding: 4px 8px;
-  cursor: pointer;
-  font-size: 13px;
+.ts-canvas-wrap {
+  flex: 1;
+  min-height: 240px;
+  overflow: auto;
+  background: #d0d0d0;
+  border: 1px solid var(--el-border-color);
+  /* 始终预留纵向滚动条槽，宽度 = 画布 384 + 16（覆盖全局 4px） */
+  scrollbar-gutter: stable;
+  box-sizing: border-box;
 }
-.pick-item:hover {
-  background: var(--el-fill-color-light);
+.ts-canvas-wrap::-webkit-scrollbar {
+  width: 16px;
+  height: 16px;
+}
+.ts-canvas-wrap::-webkit-scrollbar-track {
+  background: var(--app-scrollbar-track, rgba(0, 0, 0, 0.06));
+}
+.ts-canvas-wrap::-webkit-scrollbar-thumb {
+  background: var(--app-scrollbar-thumb, rgba(0, 0, 0, 0.18));
+  border-radius: 4px;
+}
+.ts-cv {
+  display: block;
+  width: 384px;
+  /* 高度由 canvas.height 属性决定，勿用 CSS 拉伸 */
+}
+.ts-pages {
+  flex-shrink: 0;
+  width: 100%;
+  display: flex;
+}
+.ts-pages :deep(.el-radio-button) {
+  flex: 1;
+}
+.ts-pages :deep(.el-radio-button__inner) {
+  width: 100%;
+}
+.ts-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ts-tool-btn {
+  width: 100%;
+  margin-left: 0 !important;
+  justify-content: center;
+}
+.ts-note {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ts-note :deep(.el-textarea),
+.ts-note :deep(.el-textarea__inner) {
+  height: 100%;
+  min-height: 120px;
 }
 </style>

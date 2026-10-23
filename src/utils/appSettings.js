@@ -88,6 +88,8 @@ export const DEFAULT_EDITOR_UI = {
   mapBgSkinOpacity: 1,
   dbBgSkin: '',
   dbBgSkinOpacity: 1,
+  /** 数据库弹窗内容区高度（px）；空/无效则按视口自适应；窗口变化时会钳制到可用范围 */
+  dbDialogHeight: 0,
   /** 测试游戏：启动命令（如 Game.exe 或 nw .） */
   playtestCommand: '',
   /** 测试游戏工作目录；空则用当前工作空间 */

@@ -475,6 +475,18 @@ export default {
   overflow-x: hidden;
   overflow-y: auto;
   background: var(--app-surface, #f5f5f5);
+  /* 覆盖全局 index.css 的 4px，图块预览需要正常宽度滚动条 */
+}
+.tp::-webkit-scrollbar {
+  width: 16px;
+  height: 16px;
+}
+.tp::-webkit-scrollbar-track {
+  background: var(--app-scrollbar-track, rgba(0, 0, 0, 0.06));
+}
+.tp::-webkit-scrollbar-thumb {
+  background: var(--app-scrollbar-thumb, rgba(0, 0, 0, 0.18));
+  border-radius: 4px;
 }
 .tp-empty {
   padding: 16px;

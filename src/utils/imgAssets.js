@@ -214,13 +214,31 @@ export function faceSheetLayout(img, name) {
   }
 }
 
-/** MV 动画图：cell = 图高，列 = floor(宽/高) */
+/**
+ * MV 动画图切片（对齐 rpg_sprites.js Sprite_Animation.updateCellSprite）：
+ * - 固定 cell = 192×192，固定 5 列
+ * - sx = pattern % 5 * 192
+ * - sy = floor(pattern % 100 / 5) * 192
+ * - pattern < 100 → 图1；≥ 100 → 图2
+ * 行数 = floor(图高 / 192)，最多 20 行 = 100 格（官方规格）。
+ * 图高不同 → 可选格数不同，属正常；不按图高当 cell 去猜。
+ */
 export function animationSheetLayout(img) {
-  if (!img || !img.height) return { cell: 192, cols: 1, rows: 1 }
-  const cell = img.height
-  const cols = Math.max(1, Math.floor(img.width / cell))
-  const rows = Math.max(1, Math.floor(img.height / cell))
-  return { cell, cols, rows }
+  const cell = 192
+  const cols = 5
+  const maxRows = 20
+  if (!img || !img.height) {
+    return { cell, cols, rows: 6, maxPattern: 29 }
+  }
+  const rows = Math.max(1, Math.min(maxRows, Math.floor(img.height / cell)))
+  const maxPattern = rows * cols - 1
+  return { cell, cols, rows, maxPattern }
+}
+
+/** 某张动画图可提供的 pattern 个数（0 .. count-1） */
+export function animationSheetPatternCount(img) {
+  const layout = animationSheetLayout(img)
+  return Math.max(0, (layout.rows || 0) * (layout.cols || 5))
 }
 
 export function drawCharacterIndexPreview(ctx, img, name, index, dx, dy, dw, dh) {

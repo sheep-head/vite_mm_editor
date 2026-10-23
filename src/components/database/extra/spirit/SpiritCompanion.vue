@@ -189,7 +189,7 @@ export default {
         rate: 0.1,
       }
       this.selectedTraitKey = key
-      this.tab = 'traits'
+        this.tab = 'traits'
     },
     removeTrait() {
       if (!this.selectedTraitKey) return
@@ -201,7 +201,7 @@ export default {
       const key = 'trail' + Date.now().toString(36)
       this.config.trails[key] = createEmptyTrailEntry()
       this.selectedTrailKey = key
-      this.tab = 'trails'
+        this.tab = 'trails'
     },
     removeTrail() {
       if (!this.selectedTrailKey || !this.config.trails) return
@@ -218,7 +218,7 @@ export default {
       const id = (this.config.spirits.reduce((m, s) => Math.max(m, Number(s.actorId) || 0), 0) || 0) + 1
       this.config.spirits.push(createEmptySpirit(id))
       this.spiritIndex = this.config.spirits.length - 1
-      this.tab = 'spirits'
+        this.tab = 'spirits'
     },
     dupSpirit() {
       if (!this.currentSpirit) return

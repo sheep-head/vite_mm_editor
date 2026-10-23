@@ -1,5 +1,5 @@
 <template>
-  <div v-if="modelValue" class="troop-ed">
+  <div v-if="modelValue" class="troop-ed" tabindex="0" @keydown="onPanelKeyDown">
     <db-group-box title="基本设置">
       <div class="name-row">
         <span class="lab">名称</span>
@@ -7,17 +7,20 @@
         <el-button size="small" @click="autoName">自动生成名称</el-button>
         <el-button size="small" @click="onBattleBack">更改战斗背景…</el-button>
         <el-button size="small" @click="onBattleTest">战斗测试…</el-button>
+        <el-checkbox v-model="showMemberTable" size="small" class="show-tbl">显示成员列表</el-checkbox>
       </div>
       <div class="members-row">
         <canvas
           ref="stage"
-          width="520"
-          height="280"
+          :width="stageW"
+          :height="canvasH"
           class="stage"
+          tabindex="0"
           @mousedown="onStageDown"
           @mousemove="onStageMove"
           @mouseup="onStageUp"
-          @mouseleave="onStageUp" />
+          @mouseleave="onStageUp"
+          @contextmenu.prevent="onStageContextMenu" />
         <div class="member-btns">
           <el-button size="small" :disabled="enemyPick < 0" @click="addMember">&lt;&lt; 添加</el-button>
           <el-button size="small" :disabled="memberSel < 0" @click="removeMember">删除 &gt;</el-button>
@@ -37,6 +40,64 @@
             </div>
           </el-scrollbar>
         </div>
+      </div>
+
+      <div v-if="showMemberTable" class="member-table-wrap">
+        <el-table
+          ref="memberTable"
+          :data="memberRows"
+          size="small"
+          max-height="220"
+          highlight-current-row
+          row-key="index"
+          @row-click="onTableRowClick"
+          @row-contextmenu="onTableRowContextMenu">
+          <el-table-column label="序号" width="64" align="center">
+            <template #default="{ row }">{{ String(row.index + 1).padStart(2, '0') }}</template>
+          </el-table-column>
+          <el-table-column label="名字" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.name }}</template>
+          </el-table-column>
+          <el-table-column label="X" width="100">
+            <template #default="{ row }">
+              <el-input-number
+                :model-value="row.member.x"
+                size="small"
+                :controls="false"
+                :min="0"
+                :max="stageW"
+                style="width: 80px"
+                @update:model-value="(v) => onTableCoord(row.index, 'x', v)"
+                @click.stop />
+            </template>
+          </el-table-column>
+          <el-table-column label="Y" width="100">
+            <template #default="{ row }">
+              <el-input-number
+                :model-value="row.member.y"
+                size="small"
+                :controls="false"
+                :min="0"
+                :max="stageH"
+                style="width: 80px"
+                @update:model-value="(v) => onTableCoord(row.index, 'y', v)"
+                @click.stop />
+            </template>
+          </el-table-column>
+          <el-table-column label="中途出现" width="90" align="center">
+            <template #default="{ row }">
+              <el-checkbox
+                :model-value="!!row.member.hidden"
+                @update:model-value="(v) => setMemberHidden(row.index, v)"
+                @click.stop />
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="80" align="center">
+            <template #default="{ row }">
+              <el-button link type="danger" size="small" @click.stop="removeMemberAt(row.index)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
       </div>
     </db-group-box>
 
@@ -110,6 +171,24 @@
         </div>
       </div>
     </db-group-box>
+
+    <popup-context-menu
+      menu-class="troop-member-ctx"
+      :visible="memberMenu.visible"
+      :x="memberMenu.x"
+      :y="memberMenu.y"
+      @update:visible="(v) => (memberMenu.visible = v)">
+      <template #default="{ action }">
+        <li :class="{ disabled: memberSel < 0 }" @click="action(toggleSelectedHidden)">
+          <span>{{ selectedHidden ? '✓ 中途出现' : '中途出现' }}</span>
+          <span class="sc">H</span>
+        </li>
+        <li class="sep" />
+        <li :class="{ disabled: memberSel < 0 }" @click="action(removeMember)">
+          <span>删除</span><span class="sc">Del</span>
+        </li>
+      </template>
+    </popup-context-menu>
   </div>
 </template>
 
@@ -117,11 +196,20 @@
 import DbGroupBox from './shared/DbGroupBox.vue'
 import IdNameField from './shared/IdNameField.vue'
 import EventCommandListEditor from '@/components/map/EventCommandListEditor.vue'
-import { loadDataArray, formatRecordName } from './shared/systemLookups'
+import PopupContextMenu from '@/components/shared/PopupContextMenu.vue'
+import { loadDataArray, formatRecordName, loadSystem } from './shared/systemLookups'
 import { TROOP_SPAN_OPTIONS } from './shared/rpgDbConstants'
 import { normalizeTroop } from './shared/dbDefaults'
 import { markRaw } from 'vue'
 import { resolveBattlerAbsPath, loadImageFile } from '@/utils/imgAssets'
+
+const DEFAULT_STAGE_W = 816
+const DEFAULT_STAGE_H = 624
+/** MZ 敌群可放置高度 = 画面高 − 状态栏占位 */
+const STAGE_STATUS_UI = 180
+/** 画布底部额外显示边距（不可放置） */
+const STAGE_PAD_BOTTOM = 20
+const SNAP_PX = 4
 
 function emptyConditions() {
   return {
@@ -142,7 +230,7 @@ function emptyConditions() {
 
 export default {
   name: 'TroopEditorPanel',
-  components: { DbGroupBox, IdNameField, EventCommandListEditor },
+  components: { DbGroupBox, IdNameField, EventCommandListEditor, PopupContextMenu },
   props: {
     modelValue: { type: Object, default: null },
   },
@@ -156,10 +244,33 @@ export default {
       dragging: false,
       dragOffX: 0,
       dragOffY: 0,
+      showMemberTable: false,
+      memberMenu: { visible: false, x: 0, y: 0 },
+      guideX: null,
+      guideY: null,
       _battlerCache: {},
+      _memberBounds: [],
+      _paintRaf: 0,
+      _preloadToken: 0,
     }
   },
   computed: {
+    stageW() {
+      const adv = loadSystem().advanced || {}
+      const w = Number(adv.screenWidth) || 0
+      return w > 0 ? w : DEFAULT_STAGE_W
+    },
+    /** 可放置高度（脚底 y 上限） */
+    stageH() {
+      const adv = loadSystem().advanced || {}
+      const h = Number(adv.screenHeight) || 0
+      const full = h > 0 ? h : DEFAULT_STAGE_H
+      return Math.max(120, full - STAGE_STATUS_UI)
+    },
+    /** 画布显示高度 = 可放置区 + 底部边距 */
+    canvasH() {
+      return this.stageH + STAGE_PAD_BOTTOM
+    },
     pages() {
       return (this.modelValue && this.modelValue.pages) || []
     },
@@ -188,6 +299,22 @@ export default {
       if (c.switchValid) return 'switch'
       return 'none'
     },
+    memberRows() {
+      const members = (this.modelValue && this.modelValue.members) || []
+      const enemies = loadDataArray('Enemies')
+      return members.map((m, index) => {
+        const rec = enemies[m.enemyId]
+        return {
+          index,
+          member: m,
+          name: (rec && rec.name) || '(空)',
+        }
+      })
+    },
+    selectedHidden() {
+      const m = this.selectedMember()
+      return !!(m && m.hidden)
+    },
   },
   watch: {
     modelValue: {
@@ -196,22 +323,70 @@ export default {
         if (v) normalizeTroop(v)
         this.pageTab = '0'
         this.memberSel = -1
-        this.$nextTick(() => this.paintStage())
+        this.guideX = null
+        this.guideY = null
+        this.$nextTick(() => {
+          this.preloadBattlers().then(() => this.paintStageSync())
+        })
       },
     },
     'modelValue.members': {
       deep: true,
       handler() {
-        this.paintStage()
+        if (this.dragging) return
+        this.preloadBattlers().then(() => this.schedulePaint())
       },
     },
-    pageTab() {
-      /* sync */
+    memberSel(i) {
+      this.syncTableCurrentRow(i)
+      this.schedulePaint()
     },
+    showMemberTable(v) {
+      if (v) this.$nextTick(() => this.syncTableCurrentRow(this.memberSel))
+    },
+  },
+  mounted() {
+    this._onDocKeyDown = (e) => this.onDocKeyDown(e)
+    window.addEventListener('keydown', this._onDocKeyDown, true)
+  },
+  beforeUnmount() {
+    if (this._onDocKeyDown) {
+      window.removeEventListener('keydown', this._onDocKeyDown, true)
+      this._onDocKeyDown = null
+    }
+    if (this._paintRaf) {
+      cancelAnimationFrame(this._paintRaf)
+      this._paintRaf = 0
+    }
   },
   methods: {
     pad(id) {
       return String(id).padStart(4, '0')
+    },
+    /** 脚底坐标限制在舞台内：x∈[0,stageW]，y∈[0,stageH] */
+    clampPos(x, y) {
+      const cx = Math.max(0, Math.min(this.stageW, Math.round(Number(x) || 0)))
+      const cy = Math.max(0, Math.min(this.stageH, Math.round(Number(y) || 0)))
+      return { x: cx, y: cy }
+    },
+    setMemberPos(m, x, y) {
+      if (!m) return
+      const p = this.clampPos(x, y)
+      m.x = p.x
+      m.y = p.y
+    },
+    onTableCoord(index, axis, value) {
+      const list = this.modelValue.members || []
+      const m = list[index]
+      if (!m) return
+      if (axis === 'x') this.setMemberPos(m, value, m.y)
+      else this.setMemberPos(m, m.x, value)
+      this.schedulePaint()
+    },
+    selectedMember() {
+      const list = (this.modelValue && this.modelValue.members) || []
+      if (this.memberSel < 0 || this.memberSel >= list.length) return null
+      return list[this.memberSel]
     },
     onBattleBack() {
       this.$message.info('标准 Troops 数据无战斗背景字段（背景属战斗测试/地图）')
@@ -230,113 +405,347 @@ export default {
       if (this.enemyPick < 0) return
       if (!Array.isArray(this.modelValue.members)) this.modelValue.members = []
       const n = this.modelValue.members.length
+      const baseY = Math.max(40, this.stageH - 20)
+      const pos = this.clampPos(80 + (n % 4) * 100, baseY - Math.floor(n / 4) * 48)
       this.modelValue.members.push({
         enemyId: this.enemyPick,
-        x: 80 + (n % 4) * 100,
-        y: 200 + Math.floor(n / 4) * 40,
+        x: pos.x,
+        y: pos.y,
         hidden: false,
       })
-      this.memberSel = this.modelValue.members.length - 1
-      this.paintStage()
+      this.selectMember(this.modelValue.members.length - 1)
+      this.preloadBattlers().then(() => this.schedulePaint())
     },
     removeMember() {
-      if (this.memberSel < 0) return
-      this.modelValue.members.splice(this.memberSel, 1)
-      this.memberSel = -1
-      this.paintStage()
+      this.removeMemberAt(this.memberSel)
+    },
+    removeMemberAt(index) {
+      if (index < 0) return
+      const list = this.modelValue.members || []
+      if (index >= list.length) return
+      list.splice(index, 1)
+      if (this.memberSel === index) this.memberSel = -1
+      else if (this.memberSel > index) this.memberSel -= 1
+      this.memberMenu.visible = false
+      this.schedulePaint()
     },
     clearMembers() {
       if (!window.confirm('清空全部成员？')) return
       this.modelValue.members = []
       this.memberSel = -1
-      this.paintStage()
+      this.schedulePaint()
     },
     alignMembers() {
       const list = this.modelValue.members || []
       if (!list.length) return
-      const canvas = this.$refs.stage
-      const w = canvas ? canvas.width : 520
+      const w = this.stageW
       const step = w / (list.length + 1)
+      const y = Math.max(40, this.stageH - 20)
       list.forEach((m, i) => {
-        m.x = Math.round(step * (i + 1))
-        m.y = 220
+        this.setMemberPos(m, step * (i + 1), y)
       })
-      this.paintStage()
+      this.schedulePaint()
+    },
+    selectMember(i) {
+      this.memberSel = i
+      this.$refs.stage && this.$refs.stage.focus?.()
+    },
+    setMemberHidden(index, hidden) {
+      const list = this.modelValue.members || []
+      if (index < 0 || index >= list.length) return
+      list[index].hidden = !!hidden
+      this.schedulePaint()
+    },
+    toggleSelectedHidden() {
+      const m = this.selectedMember()
+      if (!m) return
+      m.hidden = !m.hidden
+      this.schedulePaint()
+    },
+    syncTableCurrentRow(i) {
+      if (!this.showMemberTable) return
+      const table = this.$refs.memberTable
+      if (!table) return
+      this.$nextTick(() => {
+        if (i < 0) {
+          table.setCurrentRow?.(null)
+          return
+        }
+        const row = this.memberRows[i]
+        if (row) {
+          table.setCurrentRow?.(row)
+          // 滚入视口
+          const wrap = table.$el && table.$el.querySelector('.el-table__body-wrapper')
+          const tr = wrap && wrap.querySelectorAll('tbody tr')[i]
+          if (tr && typeof tr.scrollIntoView === 'function') {
+            tr.scrollIntoView({ block: 'nearest' })
+          }
+        }
+      })
+    },
+    onTableRowClick(row) {
+      this.selectMember(row.index)
+    },
+    onTableRowContextMenu(row, _col, e) {
+      e.preventDefault()
+      this.selectMember(row.index)
+      this.memberMenu = { visible: true, x: e.clientX, y: e.clientY }
     },
     async ensureBattler(name) {
       if (!name) return null
-      if (this._battlerCache[name]) return this._battlerCache[name]
+      if (this._battlerCache[name] !== undefined) return this._battlerCache[name]
       const loaded = await loadImageFile(resolveBattlerAbsPath(name, 'enemies'))
       const img = loaded ? markRaw(loaded) : null
       this._battlerCache[name] = img
       return img
     },
-    async paintStage() {
-      const canvas = this.$refs.stage
-      if (!canvas || !this.modelValue) return
-      const ctx = canvas.getContext('2d')
-      ctx.fillStyle = '#111'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-      const members = this.modelValue.members || []
-      for (let i = 0; i < members.length; i++) {
-        const m = members[i]
-        const enemies = loadDataArray('Enemies')
+    async preloadBattlers() {
+      const token = ++this._preloadToken
+      const members = (this.modelValue && this.modelValue.members) || []
+      const enemies = loadDataArray('Enemies')
+      const names = new Set()
+      for (const m of members) {
         const rec = enemies[m.enemyId]
         const name = (rec && rec.battlerName) || ''
-        const img = await this.ensureBattler(name)
+        if (name) names.add(name)
+      }
+      await Promise.all([...names].map((n) => this.ensureBattler(n)))
+      if (token !== this._preloadToken) return
+    },
+    schedulePaint() {
+      if (this._paintRaf) return
+      this._paintRaf = requestAnimationFrame(() => {
+        this._paintRaf = 0
+        this.paintStageSync()
+      })
+    },
+    paintStageSync() {
+      const canvas = this.$refs.stage
+      if (!canvas || !this.modelValue) return
+      const fieldH = this.stageH
+      const padH = this.canvasH
+      if (canvas.width !== this.stageW) canvas.width = this.stageW
+      if (canvas.height !== padH) canvas.height = padH
+      const ctx = canvas.getContext('2d')
+      const w = canvas.width
+      const h = canvas.height
+      ctx.fillStyle = '#111'
+      ctx.fillRect(0, 0, w, fieldH)
+      // 底部不可放置边距
+      ctx.fillStyle = '#1a1a1a'
+      ctx.fillRect(0, fieldH, w, h - fieldH)
+
+      // 底边中线参考（可放置区底边 = 中间最底部）
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)'
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(w / 2, 0)
+      ctx.lineTo(w / 2, fieldH)
+      ctx.moveTo(0, fieldH - 0.5)
+      ctx.lineTo(w, fieldH - 0.5)
+      ctx.stroke()
+      // 原点十字（可放置区底边中点）
+      const ox = w / 2
+      const oy = fieldH
+      ctx.strokeStyle = 'rgba(255,200,80,0.55)'
+      ctx.beginPath()
+      ctx.moveTo(ox - 10, oy)
+      ctx.lineTo(ox + 10, oy)
+      ctx.moveTo(ox, oy - 10)
+      ctx.lineTo(ox, oy)
+      ctx.stroke()
+
+      const members = this.modelValue.members || []
+      const enemies = loadDataArray('Enemies')
+      const bounds = []
+      for (let i = 0; i < members.length; i++) {
+        const m = members[i]
+        const rec = enemies[m.enemyId]
+        const name = (rec && rec.battlerName) || ''
+        const img = name ? this._battlerCache[name] : null
+        let bx
+        let by
+        let bw
+        let bh
         if (img) {
-          const scale = Math.min(1, 120 / img.height)
-          const dw = img.width * scale
-          const dh = img.height * scale
+          bw = img.width
+          bh = img.height
+          bx = m.x - bw / 2
+          by = m.y - bh
           ctx.globalAlpha = m.hidden ? 0.35 : 1
-          ctx.drawImage(img, m.x - dw / 2, m.y - dh, dw, dh)
+          ctx.drawImage(img, bx, by, bw, bh)
           ctx.globalAlpha = 1
         } else {
+          bw = 40
+          bh = 40
+          bx = m.x - 20
+          by = m.y - 40
           ctx.fillStyle = '#666'
-          ctx.fillRect(m.x - 20, m.y - 40, 40, 40)
+          ctx.fillRect(bx, by, bw, bh)
         }
+        bounds[i] = { x: bx, y: by, w: bw, h: bh }
         if (i === this.memberSel) {
           ctx.strokeStyle = '#4ea1ff'
           ctx.lineWidth = 2
-          ctx.strokeRect(m.x - 30, m.y - 60, 60, 70)
+          ctx.strokeRect(bx - 2, by - 2, bw + 4, bh + 4)
         }
+      }
+      this._memberBounds = bounds
+
+      // 对齐辅助线（仅画在可放置区内）
+      if (this.guideX != null) {
+        ctx.strokeStyle = 'rgba(255, 80, 80, 0.85)'
+        ctx.lineWidth = 1
+        ctx.setLineDash([4, 4])
+        ctx.beginPath()
+        ctx.moveTo(this.guideX + 0.5, 0)
+        ctx.lineTo(this.guideX + 0.5, fieldH)
+        ctx.stroke()
+        ctx.setLineDash([])
+      }
+      if (this.guideY != null) {
+        ctx.strokeStyle = 'rgba(80, 180, 255, 0.85)'
+        ctx.lineWidth = 1
+        ctx.setLineDash([4, 4])
+        ctx.beginPath()
+        ctx.moveTo(0, this.guideY + 0.5)
+        ctx.lineTo(w, this.guideY + 0.5)
+        ctx.stroke()
+        ctx.setLineDash([])
       }
     },
     hitMember(x, y) {
-      const members = this.modelValue.members || []
-      for (let i = members.length - 1; i >= 0; i--) {
-        const m = members[i]
-        if (Math.abs(x - m.x) < 40 && y < m.y && y > m.y - 80) return i
+      const bounds = this._memberBounds || []
+      for (let i = bounds.length - 1; i >= 0; i--) {
+        const b = bounds[i]
+        if (!b) continue
+        if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return i
       }
       return -1
     },
-    onStageDown(e) {
+    canvasPoint(e) {
       const canvas = this.$refs.stage
       const rect = canvas.getBoundingClientRect()
-      const x = ((e.clientX - rect.left) / rect.width) * canvas.width
-      const y = ((e.clientY - rect.top) / rect.height) * canvas.height
+      return {
+        x: ((e.clientX - rect.left) / rect.width) * canvas.width,
+        y: ((e.clientY - rect.top) / rect.height) * canvas.height,
+      }
+    },
+    applySnap(nx, ny, selfIndex) {
+      const members = this.modelValue.members || []
+      let gx = null
+      let gy = null
+      let x = nx
+      let y = ny
+      for (let i = 0; i < members.length; i++) {
+        if (i === selfIndex) continue
+        const o = members[i]
+        if (Math.abs(nx - o.x) <= SNAP_PX) {
+          x = o.x
+          gx = o.x
+        }
+        if (Math.abs(ny - o.y) <= SNAP_PX) {
+          y = o.y
+          gy = o.y
+        }
+      }
+      const clamped = this.clampPos(x, y)
+      // 吸附点在界外时不画辅助线
+      this.guideX = gx != null && gx === clamped.x ? gx : null
+      this.guideY = gy != null && gy === clamped.y ? gy : null
+      return clamped
+    },
+    onStageDown(e) {
+      if (e.button !== 0) return
+      this.memberMenu.visible = false
+      this.$refs.stage && this.$refs.stage.focus?.()
+      const { x, y } = this.canvasPoint(e)
       const i = this.hitMember(x, y)
       this.memberSel = i
       if (i >= 0) {
         this.dragging = true
         this.dragOffX = x - this.modelValue.members[i].x
         this.dragOffY = y - this.modelValue.members[i].y
+      } else {
+        this.guideX = null
+        this.guideY = null
       }
-      this.paintStage()
+      this.schedulePaint()
     },
     onStageMove(e) {
       if (!this.dragging || this.memberSel < 0) return
-      const canvas = this.$refs.stage
-      const rect = canvas.getBoundingClientRect()
-      const x = ((e.clientX - rect.left) / rect.width) * canvas.width
-      const y = ((e.clientY - rect.top) / rect.height) * canvas.height
+      const { x, y } = this.canvasPoint(e)
       const m = this.modelValue.members[this.memberSel]
-      m.x = Math.round(x - this.dragOffX)
-      m.y = Math.round(y - this.dragOffY)
-      this.paintStage()
+      const rawX = Math.round(x - this.dragOffX)
+      const rawY = Math.round(y - this.dragOffY)
+      const snapped = this.applySnap(rawX, rawY, this.memberSel)
+      m.x = snapped.x
+      m.y = snapped.y
+      this.schedulePaint()
     },
     onStageUp() {
+      if (!this.dragging) return
       this.dragging = false
+      this.guideX = null
+      this.guideY = null
+      this.schedulePaint()
+    },
+    onStageContextMenu(e) {
+      const { x, y } = this.canvasPoint(e)
+      const i = this.hitMember(x, y)
+      if (i >= 0) this.memberSel = i
+      if (this.memberSel < 0) return
+      this.memberMenu = { visible: true, x: e.clientX, y: e.clientY }
+      this.schedulePaint()
+    },
+    nudgeSelected(dx, dy) {
+      const m = this.selectedMember()
+      if (!m) return
+      m.x = Math.round(Number(m.x) || 0) + dx
+      m.y = Math.round(Number(m.y) || 0) + dy
+      this.schedulePaint()
+    },
+    isTypingTarget(el) {
+      if (!el) return false
+      const tag = (el.tagName || '').toLowerCase()
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return true
+      if (el.isContentEditable) return true
+      return !!(el.closest && el.closest('input, textarea, select, [contenteditable="true"]'))
+    },
+    onPanelKeyDown() {
+      /* 焦点在面板时由 onDocKeyDown 统一处理 */
+    },
+    onDocKeyDown(e) {
+      if (!this.modelValue) return
+      if (this.isTypingTarget(e.target)) return
+      // 仅当焦点在本面板内时响应
+      const root = this.$el
+      if (!root || !root.contains(document.activeElement)) {
+        // 允许 canvas 已失焦但仍点过本面板的情况：若菜单打开也响应
+        if (!this.memberMenu.visible) return
+      }
+      const step = e.shiftKey ? 10 : 1
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        this.nudgeSelected(-step, 0)
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        this.nudgeSelected(step, 0)
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        this.nudgeSelected(0, -step)
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        this.nudgeSelected(0, step)
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (this.memberSel < 0) return
+        e.preventDefault()
+        this.removeMember()
+      } else if (e.key === ' ' || e.key === 'h' || e.key === 'H') {
+        if (this.memberSel < 0) return
+        e.preventDefault()
+        this.toggleSelectedHidden()
+      }
     },
     newPage() {
       this.modelValue.pages.push({
@@ -391,7 +800,7 @@ export default {
 <style scoped>
 .troop-ed {
   width: 100%;
-  max-width: 1100px;
+  outline: none;
 }
 .name-row {
   display: flex;
@@ -399,6 +808,9 @@ export default {
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 10px;
+}
+.show-tbl {
+  margin-left: 8px;
 }
 .lab {
   font-size: 12px;
@@ -408,12 +820,14 @@ export default {
   gap: 10px;
   flex-wrap: wrap;
   align-items: flex-start;
+  overflow-x: auto;
 }
 .stage {
   border: 1px solid var(--app-border);
   background: #111;
   cursor: crosshair;
   flex-shrink: 0;
+  outline: none;
 }
 .member-btns {
   display: flex;
@@ -437,6 +851,10 @@ export default {
 }
 .enemy-item.active {
   background: var(--el-color-primary-light-7, #c6e2ff);
+}
+.member-table-wrap {
+  margin-top: 10px;
+  max-width: 816px;
 }
 .mb {
   margin-bottom: 6px;
@@ -468,5 +886,21 @@ export default {
 }
 .troop-cmds :deep(.ev-cmd-list) {
   max-height: 36vh;
+}
+</style>
+
+<style>
+.popup-context-menu.troop-member-ctx {
+  display: flex;
+  flex-direction: column;
+}
+.popup-context-menu.troop-member-ctx li {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+}
+.popup-context-menu.troop-member-ctx .sc {
+  color: #909399;
+  font-size: 12px;
 }
 </style>
